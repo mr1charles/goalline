@@ -43,6 +43,9 @@ func _ready() -> void:
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.theme = ui_theme
 	layer.add_child(root)
+	if "--uishots" in args:
+		_ui_shots()
+		return
 	_main_menu()
 
 # ------------------------------------------------------------ helpers
@@ -120,11 +123,14 @@ func _btn(parent: Node, text: String, cb: Callable, min_h := 64) -> Button:
 	parent.add_child(b)
 	return b
 
-func _lab(parent: Node, text: String, size := 24) -> Label:
+func _lab(parent: Node, text: String, size := 24, wrap := false) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
-	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if wrap:
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size = Vector2(400, 0)
+		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	parent.add_child(l)
 	return l
 
@@ -174,7 +180,7 @@ func _main_menu() -> void:
 	_btn(vb, "Become a Legend  (Career)", _career_entry, 76)
 	_btn(vb, "Settings", _settings, 76)
 	vb.add_spacer(false)
-	_lab(vb, "Controls: left thumb = move.  A pass  X lob  Y through ball  B shoot (hold for power)  SPRINT hold.  Defending: B tackle, X slide, A/Y switch or call.", 18)
+	_lab(vb, "Controls: left thumb = move.  A pass  X lob  Y through ball  B shoot (hold for power)  SPRINT hold.  Defending: B tackle, X slide, A/Y switch or call.", 18, true)
 
 func _kickoff_setup() -> void:
 	var vb := _screen("Kick Off")
@@ -187,16 +193,20 @@ func _kickoff_setup() -> void:
 	g.add_theme_constant_override("h_separation", 20)
 	g.add_theme_constant_override("v_separation", 10)
 	vb.add_child(g)
-	_lab(g, "Your team")
+	_lab(g, "Your team").custom_minimum_size.x = 300
 	var o1 := _opt(g, names, 0)
+	o1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lab(g, "Opponent")
 	var o2 := _opt(g, names, 1)
+	o2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lab(g, "Match length (min)")
 	var mins := [1, 2, 3, 5, 8, 10]
 	var o3 := _opt(g, mins, mins.find(settings["minutes"]) if mins.has(settings["minutes"]) else 2)
+	o3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lab(g, "Difficulty")
 	var diffs := ["Easy", "Normal", "Hard"]
 	var o4 := _opt(g, diffs, 1)
+	o4.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_spacer(false)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 20)
@@ -268,8 +278,9 @@ func _career_create() -> void:
 	g.add_theme_constant_override("h_separation", 20)
 	g.add_theme_constant_override("v_separation", 10)
 	vb.add_child(g)
-	_lab(g, "Name")
+	_lab(g, "Name").custom_minimum_size.x = 300
 	var le := LineEdit.new()
+	le.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	le.text = "Jay Rivera"
 	le.max_length = 18
 	le.custom_minimum_size = Vector2(0, 58)
@@ -277,16 +288,19 @@ func _career_create() -> void:
 	_lab(g, "Position")
 	var pos_keys := Career.POS.keys()
 	var o1 := _opt(g, pos_keys, pos_keys.find("ST"))
+	o1.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lab(g, "Shirt number")
 	var sp := SpinBox.new()
 	sp.min_value = 1
 	sp.max_value = 99
 	sp.value = 10
 	sp.custom_minimum_size = Vector2(0, 58)
+	sp.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	g.add_child(sp)
 	_lab(g, "Play style")
 	var arch_keys := Career.ARCH.keys()
 	var o2 := _opt(g, arch_keys, 1)
+	o2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_lab(g, "First club")
 	var teams := Data.teams()
 	var starters := [3, 4, 5, 6, 7]
@@ -294,6 +308,7 @@ func _career_create() -> void:
 	for i in starters:
 		names.append("%s  (%d)" % [teams[i]["name"], teams[i]["rating"]])
 	var o3 := _opt(g, names, 0)
+	o3.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	vb.add_spacer(false)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 20)
@@ -312,8 +327,8 @@ func _career_intro() -> void:
 	var p: Dictionary = career.d["player"]
 	var vb := _screen("January %d" % career.d["year"])
 	vb.add_spacer(false)
-	_lab(vb, "%s signs for %s." % [p["name"], teams[career.d["club"]]["name"]], 34)
-	_lab(vb, "Season %d.  Your career is in your hands." % career.d["season"], 28)
+	_lab(vb, "%s signs for %s." % [p["name"], teams[career.d["club"]]["name"]], 34, true)
+	_lab(vb, "Season %d.  Your career is in your hands." % career.d["season"], 28, true)
 	vb.add_spacer(false)
 	_btn(vb, "Walk out", _career_hub, 76)
 
@@ -343,7 +358,7 @@ func _career_hub() -> void:
 		bar.custom_minimum_size = Vector2(0, 14)
 		left.add_child(bar)
 	var s: Dictionary = career.d["stats"]
-	_lab(left, "Career: %d apps, %d goals, %d assists, avg %.1f" % [s["apps"], s["goals"], s["assists"], s["rating_sum"] / maxf(1.0, float(s["apps"]))], 20)
+	_lab(left, "Career: %d apps, %d goals, %d assists, avg %.1f" % [s["apps"], s["goals"], s["assists"], s["rating_sum"] / maxf(1.0, float(s["apps"]))], 20, true)
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	right.add_theme_constant_override("separation", 10)
@@ -377,7 +392,7 @@ func _career_match_done(r: Dictionary, ht: int) -> void:
 	var vb := _screen("Full time", "%s  %d - %d  %s" % [teams[fx[0]]["name"], r["score"][0], r["score"][1], teams[fx[1]]["name"]])
 	vb.add_spacer(false)
 	_lab(vb, "Your match rating: %.1f" % r["rating"], 40)
-	_lab(vb, "%d goals, %d assists, %d completed passes, %d tackles won" % [lg["goals"], lg["assists"], lg["passes"], lg["tackles"]], 26)
+	_lab(vb, "%d goals, %d assists, %d completed passes, %d tackles won" % [lg["goals"], lg["assists"], lg["passes"], lg["tackles"]], 26, true)
 	_lab(vb, "+%d training points" % res["pts"], 28)
 	vb.add_spacer(false)
 	_btn(vb, "Continue", _career_hub, 76)
@@ -407,16 +422,19 @@ func _career_table(after_season: bool) -> void:
 	g.add_theme_constant_override("h_separation", 22)
 	g.add_theme_constant_override("v_separation", 6)
 	vb.add_child(g)
-	for h in ["#", "Club", "P", "W", "D", "L", "GF", "GA", "Pts"]:
-		var l := _lab(g, h, 22)
+	var widths := [50, 340, 70, 70, 70, 70, 80, 80, 90]
+	for i in 9:
+		var l := _lab(g, ["#", "Club", "P", "W", "D", "L", "GF", "GA", "Pts"][i], 22)
+		l.custom_minimum_size.x = widths[i]
 		l.modulate = Color(0.7, 0.9, 0.7)
 	var rows := career.table_sorted()
 	for i in rows.size():
 		var r: Dictionary = rows[i]
 		var mine: bool = r["team"] == career.d["club"]
 		var vals := [str(i + 1), teams[r["team"]]["name"], str(r["p"]), str(r["w"]), str(r["dr"]), str(r["l"]), str(r["gf"]), str(r["ga"]), str(r["pts"])]
-		for v in vals:
-			var l := _lab(g, v, 24)
+		for j in vals.size():
+			var l := _lab(g, vals[j], 24)
+			l.custom_minimum_size.x = widths[j]
 			if mine:
 				l.modulate = Color(1, 0.9, 0.3)
 	vb.add_spacer(false)
@@ -433,7 +451,7 @@ func _career_season_end() -> void:
 	if pos == 1:
 		_lab(vb, "CHAMPIONS!  A league title for %s." % teams[career.d["club"]]["name"], 34)
 	var ss: Dictionary = career.d["season_stats"]
-	_lab(vb, "Your season: %d apps, %d goals, %d assists, avg rating %.2f" % [ss["apps"], ss["goals"], ss["assists"], career.avg_rating()], 26)
+	_lab(vb, "Your season: %d apps, %d goals, %d assists, avg rating %.2f" % [ss["apps"], ss["goals"], ss["assists"], career.avg_rating()], 26, true)
 	_btn(vb, "View final table", func(): _career_table(true), 60)
 	_lab(vb, "Contract offers", 30)
 	var offers := career.offers(rng)
@@ -461,6 +479,9 @@ func _shots(teams: Array, mode: String) -> void:
 	var m := MatchScene.new()
 	m.cfg = {"home": h, "away": a, "minutes": 3, "human_team": 0, "mode": mode, "diff": 1.0,
 		"legend": {"name": "J. Rivera", "slot": 9, "number": 10, "pace": 70, "shoot": 65, "pass": 60, "defend": 40}}
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--tod="):
+			m.cfg["tod"] = arg.substr(6)
 	add_child(m)
 	var times := [1.5, 6.0, 12.0, 20.0]
 	var i := 0
@@ -480,6 +501,9 @@ func _career_test() -> void:
 	var teams := Data.teams()
 	var total := c.total_rounds()
 	var n_rounds := 14
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--rounds="):
+			n_rounds = int(a.substr(9))
 	for i in n_rounds:
 		var fx := c.next_fixture()
 		var club: int = c.d["club"]
@@ -492,7 +516,9 @@ func _career_test() -> void:
 		m.cfg = {"home": h, "away": a, "minutes": 2, "human_team": ht, "mode": "legend", "diff": 1.0, "legend": lg}
 		add_child(m)
 		var bot := _drive_bot(m)
+		var t0 := Time.get_ticks_msec()
 		var r = await m.finished
+		print("wall ms: ", Time.get_ticks_msec() - t0)
 		bot.cancel = true
 		m.queue_free()
 		var res := c.apply_result(r["score"][0], r["score"][1], r["rating"], r["legend"]["goals"], r["legend"]["assists"], rng)
@@ -547,3 +573,37 @@ func _bot_loop(m: MatchScene, bot: Bot, r: RandomNumberGenerator) -> void:
 			elif roll2 < 0.06:
 				m.ui.just["Y"] = true
 		m.ui.held["S"] = true
+
+func _snap(name: String) -> void:
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().create_timer(0.3).timeout
+	get_viewport().get_texture().get_image().save_png("res://shots/ui_%s.png" % name)
+
+func _ui_shots() -> void:
+	_main_menu()
+	await _snap("1_main")
+	_kickoff_setup()
+	await _snap("2_kickoff")
+	_settings()
+	await _snap("3_settings")
+	_career_entry()
+	await _snap("4_entry")
+	_career_create()
+	await _snap("5_create")
+	career = Career.new()
+	career.new_career("Jay Rivera", "ST", 10, "Finisher", 3)
+	_career_intro()
+	await _snap("6_intro")
+	_career_hub()
+	await _snap("7_hub")
+	_career_training()
+	await _snap("8_training")
+	for i in 14:
+		career.apply_result(rng.randi_range(0, 3), rng.randi_range(0, 3), 6.5, 1, 0, rng)
+	_career_table(false)
+	await _snap("9_table")
+	career.d.erase("season_done")
+	_career_hub()
+	await _snap("10_seasonend")
+	get_tree().quit()

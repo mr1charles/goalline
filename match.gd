@@ -89,19 +89,37 @@ func _ready() -> void:
 # ---------------------------------------------------------------- world
 
 func _build_world() -> void:
+	var tod: String = cfg.get("tod", ["day", "dusk", "night"][int(tinfo[0].get("idx", 0)) % 3])
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color(0.42, 0.58, 0.82)
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color(0.86, 0.89, 0.96)
 	env.ambient_light_energy = 0.75
+	var sun_col := Color(1, 1, 1)
+	var sun_e := 1.05
+	if tod == "dusk":
+		env.background_color = Color(0.9, 0.55, 0.38)
+		env.ambient_light_color = Color(0.78, 0.65, 0.72)
+		env.ambient_light_energy = 0.7
+		sun_col = Color(1.0, 0.72, 0.5)
+		sun_e = 0.95
+	elif tod == "night":
+		env.background_color = Color(0.03, 0.05, 0.13)
+		env.ambient_light_color = Color(0.5, 0.58, 0.8)
+		env.ambient_light_energy = 0.6
+		sun_col = Color(0.8, 0.85, 1.0)
+		sun_e = 0.7
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-58, 35, 0)
-	sun.light_energy = 1.05
+	sun.light_energy = sun_e
+	sun.light_color = sun_col
 	add_child(sun)
+	if tod == "night":
+		_make_floodlights()
 	var pm := MeshInstance3D.new()
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(111, 74)
@@ -228,6 +246,22 @@ func _make_goal(side: int) -> void:
 	_box(Vector3(2.2, gh, 0.04), Vector3(gx + side * 1.1, gh * 0.5, -gw), net)
 	_box(Vector3(2.2, gh, 0.04), Vector3(gx + side * 1.1, gh * 0.5, gw), net)
 	_box(Vector3(2.2, 0.04, gw * 2.0), Vector3(gx + side * 1.1, gh, 0), net)
+
+func _make_floodlights() -> void:
+	var pole := StandardMaterial3D.new()
+	pole.albedo_color = Color(0.5, 0.5, 0.55)
+	var glow := StandardMaterial3D.new()
+	glow.albedo_color = Color(1, 1, 0.9)
+	glow.emission_enabled = true
+	glow.emission = Color(1, 0.97, 0.85)
+	glow.emission_energy_multiplier = 3.0
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			var x: float = sx * 62.0
+			var z: float = sz * 44.0
+			_box(Vector3(0.6, 30, 0.6), Vector3(x, 15, z), pole)
+			for i in 3:
+				_box(Vector3(5, 1.4, 0.6), Vector3(x, 30.5 + i * 1.7, z), glow)
 
 func _make_boards() -> void:
 	var m := StandardMaterial3D.new()
@@ -632,6 +666,8 @@ func _physics_process(dt: float) -> void:
 			_tick_halftime(dt)
 		"FULLTIME":
 			_tick_fulltime(dt)
+		"REPLAY":
+			_tick_replay(dt)
 	_update_camera(dt)
 	_update_hud(dt)
 	ui.end_frame()
@@ -662,10 +698,43 @@ func _step_all(dt: float, human_ok: bool) -> void:
 	if pass_t <= 0.0:
 		pass_target = null
 
+func _record() -> void:
+	var f := PackedFloat32Array()
+	f.resize(3 + players.size() * 4)
+	f[0] = ball.position.x
+	f[1] = ball.position.y
+	f[2] = ball.position.z
+	for i in players.size():
+		var p: Player = players[i]
+		f[3 + i * 4] = p.position.x
+		f[4 + i * 4] = p.position.z
+		f[5 + i * 4] = p.rotation.y
+		f[6 + i * 4] = p.slide_t
+	rec.append(f)
+	if rec.size() > 360:
+		rec.pop_front()
+
+func _tick_replay(dt: float) -> void:
+	replay_i += dt * 60.0 * 0.7
+	var i := int(replay_i)
+	if i >= replay_frames.size() or ui.just["A"] or ui.just["B"] or ui.just["X"] or ui.just["Y"]:
+		lbl_msg.text = ""
+		_reset_kickoff(1 - restart_team)
+		return
+	var f: PackedFloat32Array = replay_frames[i]
+	ball.position = Vector3(f[0], f[1], f[2])
+	ball.shadow.global_position = Vector3(f[0], 0.02, f[2])
+	for k in players.size():
+		var p: Player = players[k]
+		p.position = Vector3(f[3 + k * 4], 0, f[4 + k * 4])
+		p.rotation.y = f[5 + k * 4]
+		p.visual.rotation.x = 1.2 if f[6 + k * 4] > 0.0 else 0.25
+
 func _tick_play(dt: float) -> void:
 	clock += dt
 	_auto_switch(dt)
 	_step_all(dt, true)
+	_record()
 	if half == 1 and clock >= match_len * 0.5:
 		_set_state("HALFTIME")
 		lbl_msg.text = "HALF TIME"
@@ -723,9 +792,15 @@ func _tick_goal(dt: float) -> void:
 				var dd = celeb_player.pos2() - p.pos2()
 				p.move_cmd = dd.normalized() if dd.length() > 3.0 else Vector2.ZERO
 				p.want_sprint = true
-	if state_t > 4.2:
-		var conceding := 1 - restart_team
-		_reset_kickoff(conceding)
+	if state_t > 3.4:
+		if rec.size() > 90 and not cfg.get("no_replay", false) and human_team >= 0:
+			replay_frames = rec.slice(maxi(0, rec.size() - 330))
+			replay_i = 0.0
+			lbl_msg.text = "REPLAY"
+			lbl_sub.text = ""
+			_set_state("REPLAY")
+		else:
+			_reset_kickoff(1 - restart_team)
 
 func _tick_halftime(dt: float) -> void:
 	for p in players:
@@ -999,7 +1074,7 @@ func _try_tackle(d: Player, slide: bool) -> bool:
 	var rng_t := 2.3 if slide else 1.65
 	if dist > rng_t:
 		return false
-	var chance = 0.36 * d.stats["tkl"] - 0.10 * (c.speed() / 9.0) + (0.12 if slide else 0.0)
+	var chance = 0.36 * d.stats["tkl"] * (0.35 if c.skill_t > 0.0 else 1.0) - 0.10 * (c.speed() / 9.0) + (0.12 if slide else 0.0)
 	if d.pos2().direction_to(c.pos2()).dot(c.face) < -0.2:
 		chance += 0.12
 	chance = clampf(chance, 0.15, 0.82)
@@ -1296,6 +1371,9 @@ func _start_restart(kind: String, team: int, pos: Vector2) -> void:
 		_set_controlled(tk)
 
 var wall: Array = []
+var rec: Array = []
+var replay_i := 0.0
+var replay_frames: Array = []
 
 
 func _foul(def: Player, victim: Player) -> void:
@@ -1379,6 +1457,16 @@ func _ai_restart_kick() -> void:
 
 # ---------------------------------------------------------------- human control
 
+func _skill_move(p: Player, mv: Vector2) -> void:
+	if p.skill_t > 0.0:
+		return
+	var perp := Vector2(-p.face.y, p.face.x)
+	var sg := signf(mv.dot(perp)) if mv.length() > 0.2 else (1.0 if rng.randf() < 0.5 else -1.0)
+	if sg == 0.0:
+		sg = 1.0
+	p.skill_t = 0.55
+	p.vel += Vector3(perp.x * sg * 4.8, 0, perp.y * sg * 4.8) + Vector3(p.face.x, 0, p.face.y) * 1.0
+
 func _manual_switch() -> void:
 	if human_team < 0:
 		return
@@ -1401,17 +1489,19 @@ func _human_control(p: Player, dt: float) -> void:
 	p.move_cmd = mv
 	p.want_sprint = ui.held["S"]
 	if has:
-		ui.labels = {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT"}
+		ui.labels = {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT", "Z": "SKILL"}
 	elif mode == "legend":
-		ui.labels = {"A": "PRESS", "B": "TACKLE", "X": "SLIDE", "Y": "CALL", "S": "SPRINT"}
+		ui.labels = {"A": "PRESS", "B": "TACKLE", "X": "SLIDE", "Y": "CALL", "S": "SPRINT", "Z": "SKILL"}
 	else:
-		ui.labels = {"A": "SWITCH", "B": "TACKLE", "X": "SLIDE", "Y": "SWITCH", "S": "SPRINT"}
+		ui.labels = {"A": "SWITCH", "B": "TACKLE", "X": "SLIDE", "Y": "SWITCH", "S": "SPRINT", "Z": "SKILL"}
 	if state != "PLAY" and has:
 		p.move_cmd = Vector2.ZERO
 		p.vel = Vector3.ZERO
 		if mv.length() > 0.3:
 			p.face = mv.normalized()
 	if has:
+		if ui.just["Z"] and state == "PLAY":
+			_skill_move(p, mv)
 		if ui.just["A"]:
 			_do_pass(p, "ground", mv)
 			charge = 0.0
@@ -1606,8 +1696,10 @@ func _ai_best_pass(p: Player, pressured: bool) -> Dictionary:
 		var val := 0.2 + clampf(fwd / 35.0, -0.3, 0.6) + open * 0.05
 		if d > 30.0:
 			val -= 0.2
-		if t == legend_player and request_t > 0.0:
-			val += 0.9
+		if t == legend_player:
+			val += 0.3
+			if request_t > 0.0:
+				val += 0.9
 		val += rng.randf() * 0.15
 		if val > best["value"]:
 			var kind := "lob" if d > 28.0 else "ground"
@@ -1648,6 +1740,8 @@ func _ai_carrier(p: Player, dt: float) -> void:
 	var dfac := diff if p.team != human_team else 1.0
 	p.ai_think = rng.randf_range(0.25, 0.55) / dfac
 	var pressured := near_d < 2.6
+	if near_d < 2.0 and p.skill_t <= 0.0 and rng.randf() < 0.22:
+		_skill_move(p, Vector2.ZERO)
 	if dg < 30.0:
 		var sv := 1.0 - dg / 34.0
 		var clear := _lane_clear(pp, goal, p.team, 1.1)
@@ -1723,6 +1817,10 @@ func _update_camera(dt: float) -> void:
 		look = celeb_player.position + Vector3(0, 1.2, 0)
 		offs = Vector3(5, 3.5, 9)
 		fov_t = 34.0
+	elif state == "REPLAY":
+		look = ball.position
+		offs = Vector3(0, 9.0, 15.0)
+		fov_t = 40.0
 	elif mode == "legend" and controlled != null:
 		var f := controlled.position * 0.72 + ball.position * 0.28
 		look = Vector3(f.x, 0, f.z)

@@ -2,11 +2,11 @@ class_name TouchUI
 extends Control
 
 var move := Vector2.ZERO
-var held := {"A": false, "B": false, "X": false, "Y": false, "S": false}
-var just := {"A": false, "B": false, "X": false, "Y": false, "S": false}
-var rel := {"A": -1.0, "B": -1.0, "X": -1.0, "Y": -1.0, "S": -1.0}
-var hold_t := {"A": 0.0, "B": 0.0, "X": 0.0, "Y": 0.0, "S": 0.0}
-var labels := {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT"}
+var held := {"A": false, "B": false, "X": false, "Y": false, "S": false, "Z": false}
+var just := {"A": false, "B": false, "X": false, "Y": false, "S": false, "Z": false}
+var rel := {"A": -1.0, "B": -1.0, "X": -1.0, "Y": -1.0, "S": -1.0, "Z": -1.0}
+var hold_t := {"A": 0.0, "B": 0.0, "X": 0.0, "Y": 0.0, "S": 0.0, "Z": 0.0}
+var labels := {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT", "Z": "SKILL"}
 var touches := {}
 var stick_id := -1
 var stick_origin := Vector2.ZERO
@@ -14,7 +14,7 @@ var stick_cur := Vector2.ZERO
 var kb_prev := {}
 var touch_active := false
 
-const KEYS := {"A": KEY_J, "B": KEY_K, "X": KEY_L, "Y": KEY_I, "S": KEY_SHIFT}
+const KEYS := {"A": KEY_J, "B": KEY_K, "X": KEY_L, "Y": KEY_I, "S": KEY_SHIFT, "Z": KEY_SPACE}
 
 func _ready() -> void:
 	set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -27,12 +27,13 @@ func _centers() -> Dictionary:
 		"A": c + Vector2(0, 78), "B": c + Vector2(78, 0),
 		"X": c + Vector2(-78, 0), "Y": c + Vector2(0, -78),
 		"S": Vector2(s.x - 360.0, s.y - 90.0),
+		"Z": Vector2(s.x - 360.0, s.y - 205.0),
 	}
 
 func _hit(p: Vector2) -> String:
 	var cs := _centers()
 	for k in cs:
-		var r := 62.0 if k != "S" else 56.0
+		var r := 62.0 if (k != "S" and k != "Z") else 56.0
 		if p.distance_to(cs[k]) < r:
 			return k
 	return ""
@@ -106,9 +107,9 @@ func end_frame() -> void:
 func _draw() -> void:
 	var font := ThemeDB.fallback_font
 	var cs := _centers()
-	var cols := {"A": Color(0.2, 0.75, 0.3), "B": Color(0.9, 0.25, 0.25), "X": Color(0.25, 0.5, 0.95), "Y": Color(0.95, 0.8, 0.15), "S": Color(0.8, 0.8, 0.85)}
+	var cols := {"A": Color(0.2, 0.75, 0.3), "B": Color(0.9, 0.25, 0.25), "X": Color(0.25, 0.5, 0.95), "Y": Color(0.95, 0.8, 0.15), "S": Color(0.8, 0.8, 0.85), "Z": Color(0.7, 0.4, 0.95)}
 	for k in cs:
-		var r := 54.0 if k != "S" else 46.0
+		var r := 54.0 if (k != "S" and k != "Z") else 46.0
 		var a := 0.55 if held[k] else 0.28
 		draw_circle(cs[k], r, Color(cols[k].r, cols[k].g, cols[k].b, a))
 		draw_arc(cs[k], r, 0, TAU, 32, Color(1, 1, 1, 0.7), 2.5)

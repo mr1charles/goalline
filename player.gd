@@ -130,6 +130,7 @@ func speed() -> float:
 func step(dt: float, has_ball: bool) -> void:
 	cd = maxf(0.0, cd - dt)
 	ai_tackle_cd = maxf(0.0, ai_tackle_cd - dt)
+	skill_t = maxf(0.0, skill_t - dt)
 	var cmd := move_cmd
 	if cmd.length() > 1.0:
 		cmd = cmd.normalized()
@@ -170,6 +171,7 @@ func step(dt: float, has_ball: bool) -> void:
 	if slide_t > 0.0:
 		lean = 1.2
 	visual.rotation.x = lean
+	visual.rotation.y = sin(skill_t * 22.0) * 0.6 if skill_t > 0.0 else 0.0
 	if is_gk and gk_dive != 0.0:
 		visual.rotation.z = gk_dive
 		gk_dive = move_toward(gk_dive, 0.0, 2.2 * dt)
