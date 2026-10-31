@@ -8,6 +8,7 @@ var last_player = null
 var mesh: MeshInstance3D
 var shadow: MeshInstance3D
 var roll := Basis.IDENTITY
+var beacon: Label3D
 
 func _ready() -> void:
 	mesh = MeshInstance3D.new()
@@ -21,7 +22,18 @@ func _ready() -> void:
 	m.albedo_texture = _ball_texture()
 	m.roughness = 0.6
 	mesh.material_override = m
+	mesh.scale = Vector3.ONE * 1.5
 	add_child(mesh)
+	beacon = Label3D.new()
+	beacon.text = "▼"
+	beacon.font_size = 64
+	beacon.pixel_size = 0.0065
+	beacon.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	beacon.modulate = Color(1, 1, 1)
+	beacon.outline_size = 10
+	beacon.no_depth_test = true
+	beacon.top_level = true
+	add_child(beacon)
 	shadow = MeshInstance3D.new()
 	var c := CylinderMesh.new()
 	c.top_radius = 0.34
@@ -60,6 +72,11 @@ func kick(v: Vector3, p) -> void:
 	if p != null:
 		last_team = p.team
 		last_player = p
+
+func _process(_d: float) -> void:
+	if beacon != null:
+		beacon.global_position = position + Vector3(0, 1.1, 0)
+		beacon.visible = carrier == null
 
 func step(dt: float) -> void:
 	if carrier != null:

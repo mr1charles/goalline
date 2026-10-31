@@ -32,6 +32,8 @@ var cam: Camera3D
 var cam_look := Vector3.ZERO
 var cam_fwd := Vector2(0, -1)
 var cam_mode := "behind"
+var cam_style := "wide"
+var me_arrow: Label
 var cam_zoom := 0.0
 var arrow: Label
 var hud: CanvasLayer
@@ -68,6 +70,7 @@ var prev_ball_x := 0.0
 var finished_sent := false
 var gk_hold_t := 0.0
 var dbg_t := 0.0
+var carry_since := 0.0
 var tel_t := 0.0
 
 func _ready() -> void:
@@ -75,6 +78,7 @@ func _ready() -> void:
 	match_len = float(cfg.get("minutes", 3)) * 60.0
 	diff = float(cfg.get("diff", 1.0))
 	human_team = int(cfg.get("human_team", 0))
+	cam_style = cfg.get("cam_style", "wide")
 	tinfo = [cfg["home"], cfg["away"]]
 	if human_team == 1:
 		attack_dir = [-1, 1]
@@ -595,12 +599,12 @@ func _build_hud() -> void:
 	radar.m = self
 	radar.anchor_left = 0.5
 	radar.anchor_right = 0.5
-	radar.anchor_top = 1.0
-	radar.anchor_bottom = 1.0
+	radar.anchor_top = 0.0
+	radar.anchor_bottom = 0.0
 	radar.offset_left = -90
 	radar.offset_right = 90
-	radar.offset_top = -78
-	radar.offset_bottom = -12
+	radar.offset_top = 8
+	radar.offset_bottom = 84
 	radar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(radar)
 	var pb := Button.new()
@@ -666,10 +670,13 @@ func _build_hud() -> void:
 	arrow.visible = false
 	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(arrow)
+	me_arrow = arrow.duplicate()
+	me_arrow.add_theme_color_override("font_color", Color(0.3, 1.0, 0.45))
+	hud.add_child(me_arrow)
 	marker = Label3D.new()
 	marker.text = "▼"
 	marker.font_size = 90
-	marker.pixel_size = 0.0028
+	marker.pixel_size = 0.0055
 	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	marker.modulate = Color(0.2, 1, 0.4)
 	marker.outline_size = 12
@@ -797,13 +804,25 @@ func _home_pos(p: Player, bias: float) -> Vector2:
 	var z := p.home_lat * Cfg.HALF_W * 0.85
 	return Vector2(x, z)
 
+func _kick_pos(p: Player) -> Vector2:
+	var dir: int = attack_dir[p.team]
+	if p.is_gk:
+		return Vector2(-dir * (Cfg.HALF_L - 1.5), 0.0)
+	var x := -dir * (5.0 + (1.0 - p.home_depth / 0.72) * 33.0)
+	var z := p.home_lat * Cfg.HALF_W * 0.8
+	if p.team == kicking_team:
+		if p.idx == 9:
+			return Vector2(-dir * 0.9, 0.0)
+		if p.idx == 8 or p.idx == 10:
+			return Vector2(-dir * 2.5, signf(p.home_lat) * 14.0)
+	elif Vector2(x, z).length() < 11.0:
+		x = -dir * sqrt(maxf(121.0 - z * z, 4.0))
+	return Vector2(x, z)
+
 func _reset_positions() -> void:
 	for p in players:
-		var h := _home_pos(p, 0.0)
+		var h := _kick_pos(p)
 		var dir: int = attack_dir[p.team]
-		# everyone in own half at kickoff
-		if h.x * dir > -1.5:
-			h.x = -dir * 2.5
 		p.position = Vector3(h.x, 0, h.y)
 		p.vel = Vector3.ZERO
 		p.cd = 0.0
@@ -823,8 +842,6 @@ func _reset_kickoff(team: int) -> void:
 	var dir: int = attack_dir[team]
 	var tk: Player = teams_p[team][9]
 	tk.position = Vector3(-dir * 0.9, 0, 0)
-	teams_p[team][8].position = Vector3(-dir * 1.5, 0, 4.0)
-	teams_p[team][10].position = Vector3(-dir * 1.5, 0, -4.0)
 	taker = tk
 	ball.carrier = tk
 	ball.last_team = team
@@ -962,7 +979,8 @@ func _tick_restart(dt: float) -> void:
 	if state_t < 0.9:
 		return
 	if taker == controlled and human_team >= 0:
-		if state_t > 6.0:
+		lbl_sub.text = "Tap PASS to play"
+		if state_t > 4.0:
 			_ai_restart_kick()
 		return
 	var wait := 1.3 if restart_kind != "kickoff" else 1.0
@@ -973,6 +991,10 @@ func _hold_ball_for_taker() -> void:
 	var y := Cfg.BALL_R
 	if restart_kind == "throwin":
 		y = 1.5
+	if restart_kind == "kickoff":
+		ball.position = Vector3(0, Cfg.BALL_R, 0)
+		ball.vel = Vector3.ZERO
+		return
 	if restart_kind == "freekick" or restart_kind == "penalty":
 		ball.position = Vector3(restart_pos.x, Cfg.BALL_R, restart_pos.y)
 		ball.vel = Vector3.ZERO
@@ -1137,6 +1159,12 @@ func _update_chasers() -> void:
 			var d = p.pos2().distance_to(ref)
 			if p.stun > 0.0:
 				d += 6.0
+			if t == human_team and controlled != null and mode == "legend":
+				var md: float = controlled.pos2().distance_to(ref)
+				if md < 14.0:
+					d = -1.0 if p == controlled else d + 40.0
+				elif p == controlled:
+					d += 60.0
 			if d < d1:
 				b2 = b1
 				d2 = d1
@@ -1187,6 +1215,7 @@ func _carry(dt: float) -> void:
 	prev_ball_x = ball.position.x
 
 func _take(p: Player) -> void:
+	carry_since = clock
 	var prev: Player = ball.last_player
 	ball.carrier = p
 	ball.last_team = p.team
@@ -1215,14 +1244,19 @@ func _possession_check() -> void:
 		if p.cd > 0.0 or p.stun > 0.0:
 			continue
 		var d := Vector2(p.position.x - bp.x, p.position.z - bp.z).length()
-		var reach := 1.05
-		var hmax := 1.3
+		var reach := 1.3
+		var hmax := 1.7
+		if p.human:
+			reach = 1.8
+			hmax = 2.1
 		if p.is_gk:
 			reach = 1.7
 			hmax = 2.6
 		if p.slide_t > 0.0:
 			reach = 1.8
 			hmax = 0.9
+		if p.human:
+			d -= 0.6
 		if d < reach and bp.y < hmax and d < bd:
 			bd = d
 			best = p
@@ -1232,14 +1266,17 @@ func _possession_check() -> void:
 	if best.is_gk:
 		_gk_contact(best, sp)
 		return
-	if sp > 20.0:
+	if best.human and sp < 30.0:
+		_take(best)
+		return
+	if sp > 22.0:
 		ball.vel = ball.vel * 0.35 + Vector3(rng.randf_range(-3, 3), rng.randf_range(0.5, 3.5), rng.randf_range(-3, 3))
 		best.cd = 0.3
 		ball.last_team = best.team
 		ball.last_player = best
 		return
 	var skill: float = best.stats["pas"]
-	if sp > 16.0 and rng.randf() > 0.7 * skill + 0.25:
+	if sp > 18.0 and rng.randf() > 0.75 * skill + 0.25:
 		ball.vel = ball.vel * 0.45 + Vector3(rng.randf_range(-2, 2), rng.randf_range(0, 1.5), rng.randf_range(-2, 2))
 		best.cd = 0.3
 		ball.last_team = best.team
@@ -1281,33 +1318,47 @@ func _try_tackle(d: Player, slide: bool) -> bool:
 		return false
 	var dist := d.pos2().distance_to(c.pos2())
 	var rng_t := 2.3 if slide else 1.65
+	if d.human:
+		rng_t = 3.2 if slide else 2.4
 	if dist > rng_t:
 		return false
 	var chance = 0.36 * d.stats["tkl"] * (0.35 if c.skill_t > 0.0 else 1.0) - 0.10 * (c.speed() / 9.0) + (0.12 if slide else 0.0)
 	if d.pos2().direction_to(c.pos2()).dot(c.face) < -0.2:
 		chance += 0.12
-	chance = clampf(chance, 0.15, 0.82)
+	if d.human:
+		chance = 0.82 if slide else 0.68
+	elif c.human:
+		chance *= 0.7
+	chance = clampf(chance, 0.12, 0.85)
 	if slide:
 		d.slide_t = 0.55
 		var dv := (c.pos2() - d.pos2()).normalized()
 		d.vel = Vector3(dv.x * 9.5, 0, dv.y * 9.5)
 		d.face = dv
 	if rng.randf() < chance:
+		auto_log["tackles"] += 1
+		if d == legend_player:
+			legend_stats["tackles"] += 1
+		c.cd = 0.6
+		c.stun = 0.2
+		if not slide and (d.human or rng.randf() < 0.6):
+			# clean win: the tackler comes away with the ball
+			ball.last_player = c
+			_take(d)
+			return true
 		var pop := (d.face * 4.0 + Vector2(rng.randf_range(-3, 3), rng.randf_range(-3, 3)))
 		ball.carrier = null
 		ball.position = Vector3(c.position.x + c.face.x * 0.7, Cfg.BALL_R, c.position.z + c.face.y * 0.7)
 		ball.vel = Vector3(pop.x, 1.0, pop.y)
 		ball.last_team = d.team
 		ball.last_player = d
-		c.cd = 0.6
-		c.stun = 0.15
 		d.cd = 0.0
-		auto_log["tackles"] += 1
-		if d == legend_player:
-			legend_stats["tackles"] += 1
 		return true
-	d.stun = 0.5 if not slide else 0.8
-	if slide and dist < 2.0 and rng.randf() < 0.6 and state == "PLAY":
+	if d.human:
+		d.stun = 0.1 if not slide else 0.35
+	else:
+		d.stun = 0.5 if not slide else 0.8
+	if slide and dist < 2.0 and rng.randf() < (0.3 if d.human else 0.6) and state == "PLAY":
 		_foul(d, c)
 	return false
 
@@ -1381,12 +1432,12 @@ func _kick_to_point(p: Player, tgt: Vector2, kind: String, rcv) -> void:
 	var hs := 10.0
 	var vy := 0.0
 	if kind == "lob":
-		hs = clampf(dist * 0.62 + 6.0, 9.0, 22.0)
+		hs = clampf(dist * 0.8 + 9.0, 12.0, 27.0)
 		vy = Cfg.GRAV * (dist / hs) * 0.5
 	elif kind == "thru":
 		hs = clampf(9.0 + dist * 1.15, 11.0, 28.0)
 	else:
-		hs = clampf(7.0 + dist * 0.95, 9.0, 23.0)
+		hs = clampf(9.0 + dist * 1.05, 11.0, 26.0)
 	var ang := rng.randfn(0.0, 0.025 / p.stats["pas"]) * (1.0 + hs * 0.03)
 	var dd := d.normalized().rotated(ang)
 	ball.carrier = null
@@ -1627,6 +1678,8 @@ func _ai_restart_kick() -> void:
 	var p := taker
 	if p == null:
 		return
+	if restart_kind != "corner" and restart_kind != "penalty" and _answer_call(p):
+		return
 	match restart_kind:
 		"kickoff":
 			_pass_to(p, teams_p[p.team][6], "ground")
@@ -1707,12 +1760,24 @@ func _human_control(p: Player, dt: float) -> void:
 	var has = ball.carrier == p
 	p.move_cmd = mv
 	p.want_sprint = ui.held["S"]
+	if pass_target == p and ball.carrier == null and mv.length() < 0.2:
+		var meet := Vector2(ball.position.x, ball.position.z) + Vector2(ball.vel.x, ball.vel.z) * 0.35
+		p.move_cmd = (meet - p.pos2()).limit_length(1.0)
+		p.want_sprint = true
 	if has or mode == "practice":
 		ui.labels = {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT", "Z": "SKILL"}
+	elif mode == "legend" and ball.carrier != null and ball.carrier.team == p.team:
+		ui.labels = {"A": "", "B": "", "X": "", "Y": "CALL", "S": "SPRINT", "Z": ""}
 	elif mode == "legend":
-		ui.labels = {"A": "PRESS", "B": "TACKLE", "X": "SLIDE", "Y": "CALL", "S": "SPRINT", "Z": "SKILL"}
+		ui.labels = {"A": "PRESS", "B": "TACKLE", "X": "SLIDE", "Y": "CALL", "S": "SPRINT", "Z": ""}
 	else:
-		ui.labels = {"A": "SWITCH", "B": "TACKLE", "X": "SLIDE", "Y": "SWITCH", "S": "SPRINT", "Z": "SKILL"}
+		ui.labels = {"A": "SWITCH", "B": "TACKLE", "X": "SLIDE", "Y": "", "S": "SPRINT", "Z": ""}
+	if mode == "legend" and not has and ui.held["A"] and ball.carrier != null and ball.carrier.team != p.team:
+		p.move_cmd = (ball.carrier.pos2() - p.pos2()).limit_length(1.0)
+		p.want_sprint = true
+	if state == "KICKOFF" and not has:
+		p.move_cmd = Vector2.ZERO
+		p.want_sprint = false
 	if state != "PLAY" and has:
 		p.move_cmd = Vector2.ZERO
 		p.vel = Vector3.ZERO
@@ -1751,7 +1816,8 @@ func _human_control(p: Player, dt: float) -> void:
 				p.vel = Vector3(p.face.x * 9.0, 0, p.face.y * 9.0)
 		elif ui.just["Y"]:
 			if mode == "legend":
-				request_t = 1.6
+				request_t = 3.0
+				call_stats["calls"] += 1
 			else:
 				_manual_switch()
 		elif ui.just["A"]:
@@ -1761,6 +1827,22 @@ func _human_control(p: Player, dt: float) -> void:
 		request_t = maxf(0.0, request_t - dt)
 
 var request_t := 0.0
+var call_stats := {"calls": 0, "answered": 0}
+
+func _answer_call(p: Player) -> bool:
+	if request_t <= 0.0 or legend_player == null or p == legend_player or p.team != legend_player.team:
+		return false
+	var d := p.pos2().distance_to(legend_player.pos2())
+	if d < 2.0:
+		return false
+	var kind := "ground"
+	if d > 26.0 or not _lane_clear(p.pos2(), legend_player.pos2(), p.team, 1.0):
+		kind = "lob"
+	request_t = 0.0
+	call_stats["answered"] += 1
+	Telemetry.ev("call_answered", {"from": p.pname, "kind": kind, "d": snappedf(d, 0.1)})
+	_pass_to(p, legend_player, kind)
+	return true
 
 # ---------------------------------------------------------------- AI
 
@@ -1793,15 +1875,10 @@ func _restart_target(p: Player) -> Vector2:
 			return Vector2(gx + inward * (6.0 + k * 2.0), -6.0 + k * 3.0)
 		if p.team != restart_team and p.role != "FWD":
 			return Vector2(gx + inward * (3.0 + k * 1.5), -5.0 + k * 2.5)
-	var h := _home_pos(p, _shape_depth_shift(p.team))
 	if restart_kind == "kickoff":
-		var dir: int = attack_dir[p.team]
-		if h.x * dir > -2.0:
-			h.x = -dir * 2.5
-		if p.team != kicking_team and absf(h.x) < 10.0:
-			h.x = -dir * 10.0
-	else:
-		h.y = lerpf(h.y, restart_pos.y, 0.3)
+		return _kick_pos(p)
+	var h := _home_pos(p, _shape_depth_shift(p.team))
+	h.y = lerpf(h.y, restart_pos.y, 0.3)
 	return h
 
 func _lane_clear(a: Vector2, b: Vector2, team: int, margin: float) -> bool:
@@ -1916,9 +1993,7 @@ func _ai_best_pass(p: Player, pressured: bool) -> Dictionary:
 		if d > 30.0:
 			val -= 0.2
 		if t == legend_player:
-			val += 0.3
-			if request_t > 0.0:
-				val += 0.9
+			val += 0.45
 		val += rng.randf() * 0.15
 		if val > best["value"]:
 			var kind := "lob" if d > 28.0 else "ground"
@@ -1928,6 +2003,8 @@ func _ai_best_pass(p: Player, pressured: bool) -> Dictionary:
 	return best
 
 func _ai_carrier(p: Player, dt: float) -> void:
+	if _answer_call(p):
+		return
 	var dirx: int = attack_dir[p.team]
 	var pp := p.pos2()
 	var goal := Vector2(dirx * Cfg.HALF_L, 0.0)
@@ -1967,6 +2044,8 @@ func _ai_carrier(p: Player, dt: float) -> void:
 		if (clear or dg < 14.0) and rng.randf() < sv * 1.5:
 			_do_shot(p, clampf(0.3 + sv * 0.5, 0.3, 0.8), Vector2.ZERO)
 			return
+	if not pressured and clock - carry_since < 0.9:
+		return
 	var best := _ai_best_pass(p, pressured)
 	var thr := 0.75 if not pressured else 0.15
 	if best["target"] != null and best["value"] > thr and (pressured or rng.randf() < 0.55):
@@ -1986,6 +2065,8 @@ func _ai_gk(p: Player, dt: float) -> void:
 		return
 	if ball.carrier == p:
 		p.move_cmd = Vector2.ZERO
+		if p.ai_think < 0.6 and _answer_call(p):
+			return
 		p.ai_think -= dt
 		if p.ai_think <= 0.0:
 			var opts := [1, 2, 3, 4, 5, 7]
@@ -2054,7 +2135,7 @@ func _update_camera(dt: float) -> void:
 		pos_off = Vector3(0, 15.0, 24.0)
 		fov_t = 46.0
 		cam_fwd = cam_fwd.lerp(Vector2(0, -1), 1.0 - exp(-3.0 * dt)).normalized()
-	elif (mode == "legend" or mode == "practice") and controlled != null and human_team >= 0:
+	elif (mode == "practice" or (mode == "legend" and cam_style == "close")) and controlled != null and human_team >= 0:
 		var dirv: int = attack_dir[human_team]
 		var target_fwd := Vector2(dirv, -0.3).normalized()
 		cam_fwd = cam_fwd.lerp(target_fwd, 1.0 - exp(-2.5 * dt)).normalized()
@@ -2080,15 +2161,20 @@ func _update_camera(dt: float) -> void:
 		var bv := Vector3(ball.vel.x, 0, ball.vel.z)
 		var lead := bv * 0.5
 		lead = lead.limit_length(10.0)
-		var wx := clampf(bpos.x + lead.x + dd * 3.0, -Cfg.HALF_L + 10.0, Cfg.HALF_L - 10.0)
-		var wz := clampf(bpos.z * 0.45 + lead.z * 0.35, -14.0, 14.0)
-		look = Vector3(wx, 0, wz)
+		var fx := bpos.x + lead.x + dd * 3.0
+		var fz := bpos.z * 0.6 + lead.z * 0.35
 		var spread := 0.0
 		if controlled != null:
-			spread = controlled.pos2().distance_to(Vector2(bpos.x, bpos.z))
-		var zt := clampf(bv.length() / 32.0 + spread / 55.0, 0.0, 1.0)
+			var cp := controlled.position
+			spread = Vector2(cp.x - bpos.x, cp.z - bpos.z).length()
+			# keep you and the ball in the same picture
+			var w := 0.4 if mode == "legend" else 0.2
+			fx = lerpf(fx, cp.x, w)
+			fz = lerpf(fz, cp.z * 0.6, w)
+		look = Vector3(clampf(fx, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, clampf(fz, -22.0, 22.0) + 4.0)
+		var zt := clampf(bv.length() / 40.0 + spread / 42.0, 0.0, 1.0)
 		cam_zoom = lerpf(cam_zoom, zt, 1.0 - exp(-1.6 * dt))
-		pos_off = Vector3(-dd * 8.0, 23.0 + 8.0 * cam_zoom, 24.0 + 9.0 * cam_zoom)
+		pos_off = Vector3(-dd * 8.0, 24.0 + 13.0 * cam_zoom, 24.0 + 13.0 * cam_zoom)
 		fov_t = 42.0
 		cam_fwd = cam_fwd.lerp(Vector2(dd * 8.0, -24.0).normalized(), 1.0 - exp(-2.5 * dt)).normalized()
 		k_look = 1.0 - exp(-5.0 * dt)
@@ -2098,6 +2184,8 @@ func _update_camera(dt: float) -> void:
 	cam.fov = lerpf(cam.fov, fov_t, 1.0 - exp(-3.0 * dt))
 
 func _update_tags() -> void:
+	if marker != null:
+		marker.text = "PASS!" if request_t > 0.0 else "▼"
 	if controlled == null:
 		stam_bg.visible = false
 		stam_fill.visible = false
@@ -2118,6 +2206,27 @@ func _update_tags() -> void:
 			p.name_tag.text = p.pname if p == c else (p.pname.get_slice(" ", 1) if " " in p.pname else p.pname)
 			p.name_tag.modulate = Color(0.35, 1.0, 0.5) if p == c else tinfo[p.team]["c1"].lightened(0.55)
 			p.name_tag.position = Vector3(0, 2.95 if p == c else 2.5, 0)
+		if p.mate_mark != null:
+			p.mate_mark.visible = mode == "legend" and p.team == human_team and p != c
+
+func _edge_arrow(l: Label, wp: Vector3, vp: Vector2) -> void:
+	var behind := cam.is_position_behind(wp)
+	var sp := cam.unproject_position(wp)
+	var off := behind or sp.x < 30.0 or sp.x > vp.x - 30.0 or sp.y < 30.0 or sp.y > vp.y - 30.0
+	l.visible = off and (state == "PLAY" or state == "RESTART")
+	if not off:
+		return
+	var c := vp * 0.5
+	var d := sp - c
+	if behind:
+		d = -d
+	if d.length() < 1.0:
+		d = Vector2(0, 1)
+	var e := d.normalized()
+	var t := minf(((vp.x - 90.0) * 0.5) / maxf(absf(e.x), 0.001), ((vp.y - 130.0) * 0.5) / maxf(absf(e.y), 0.001))
+	l.pivot_offset = Vector2(20, 20)
+	l.position = c + e * t - Vector2(20, 20)
+	l.rotation = d.angle() + PI * 0.5
 
 func _update_arrow() -> void:
 	if arrow == null or cam == null or ball == null:
@@ -2127,6 +2236,8 @@ func _update_arrow() -> void:
 	var sp := cam.unproject_position(ball.position)
 	var off := behind or sp.x < 40.0 or sp.x > vp.x - 40.0 or sp.y < 60.0 or sp.y > vp.y - 40.0
 	arrow.visible = off and (state == "PLAY" or state == "RESTART")
+	if controlled != null and me_arrow != null:
+		_edge_arrow(me_arrow, controlled.position + Vector3(0, 1, 0), vp)
 	if off:
 		var c := vp * 0.5
 		var d := sp - c

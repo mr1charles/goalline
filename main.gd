@@ -30,6 +30,11 @@ func _ready() -> void:
 		add_child(m)
 		m.finished.connect(func(r): print("SUMMARY goals=%d,%d shots=%d,%d on=%d,%d passes=%d,%d tackles=%d kicks=%d throw=%d corner=%d gk=%d" % [r["score"][0], r["score"][1], r["shots"][0], r["shots"][1], r["shots_on"][0], r["shots_on"][1], m.passes_done[0], m.passes_done[1], r["log"]["tackles"], r["log"]["kicks"], r["log"]["throwins"], r["log"]["corners"], r["log"]["goalkicks"]]); get_tree().quit())
 		return
+	if "--qa" in args:
+		Engine.time_scale = 3.0
+		Engine.max_physics_steps_per_frame = 8
+		_qa(args)
+		return
 	if "--practicetest" in args:
 		Engine.time_scale = 3.0
 		Engine.max_physics_steps_per_frame = 8
@@ -183,21 +188,35 @@ func _team_cfg(idx: int, rating: float) -> Dictionary:
 	t["rs"] = Career.team_rs(rating, rng)
 	return t
 
+func _kit_avg(t: Dictionary) -> Color:
+	var c1: Color = t["c1"]
+	var c2: Color = t["c2"]
+	return c1.lerp(c2, 0.5) if int(t.get("style", 0)) != 0 else c1
+
 func _fix_clash(h: Dictionary, a: Dictionary) -> Dictionary:
-	var c1: Color = h["c1"]
-	var c2: Color = a["c1"]
-	var dist := absf(c1.r - c2.r) + absf(c1.g - c2.g) + absf(c1.b - c2.b)
-	if dist < 0.9:
-		var b := a.duplicate()
-		b["c1"] = a["c2"]
-		b["c2"] = a["c1"]
-		return b
-	return a
+	# teams must be readable at a glance: compare overall kit colour, swap to a plain change kit if close
+	var ha := _kit_avg(h)
+	var aa := _kit_avg(a)
+	if absf(ha.r - aa.r) + absf(ha.g - aa.g) + absf(ha.b - aa.b) >= 1.0:
+		return a
+	var best := Color(1, 1, 1)
+	var bd := -1.0
+	for c in [Color(0.97, 0.97, 0.97), Color(0.05, 0.08, 0.3), Color(0.1, 0.75, 0.85), Color(0.95, 0.3, 0.75)]:
+		var d: float = absf(ha.r - c.r) + absf(ha.g - c.g) + absf(ha.b - c.b)
+		if d > bd:
+			bd = d
+			best = c
+	var b2 := a.duplicate()
+	b2["c1"] = best
+	b2["c2"] = Color(0.1, 0.1, 0.12) if best.get_luminance() > 0.5 else Color(1, 1, 1)
+	b2["style"] = 0
+	return b2
 
 func _launch_match(cfgm: Dictionary, on_done: Callable) -> void:
 	Telemetry.ev("match_launch", {"mode": cfgm.get("mode"), "home": cfgm["home"].get("name"), "away": cfgm["away"].get("name"), "minutes": cfgm.get("minutes"), "tod": cfgm.get("tod", "auto")})
 	if Telemetry.inst != null:
 		Telemetry.inst.in_match = true
+	cfgm["cam_style"] = settings.get("camera", "wide")
 	layer.visible = false
 	match_node = MatchScene.new()
 	match_node.cfg = cfgm
@@ -278,6 +297,9 @@ func _settings() -> void:
 	var mins := [2, 3, 4, 5, 8, 10]
 	_lab(inner, "Career match length (min)")
 	var o := _opt(inner, mins, mins.find(settings["minutes"]) if mins.has(settings["minutes"]) else 2)
+	_lab(inner, "Career camera")
+	var cams := ["wide", "close"]
+	var cam_o := _opt(inner, ["Wide TV camera (see everything)", "Close, behind your player"], cams.find(settings.get("camera", "wide")))
 	_lab(inner, "Touch controls")
 	var sizes := [0.85, 1.0, 1.2]
 	var size_o := _opt(inner, ["Small buttons", "Normal buttons", "Large buttons"], sizes.find(TouchUI.scale_f) if sizes.has(TouchUI.scale_f) else 1)
@@ -314,6 +336,7 @@ func _settings() -> void:
 			names.append(e.text)
 		Data.save_team_names(names)
 		settings["minutes"] = mins[o.selected]
+		settings["camera"] = cams[cam_o.selected]
 		settings["btn_scale"] = sizes[size_o.selected]
 		settings["lefty"] = left_cb.button_pressed
 		settings["btn_opacity"] = ops[op_o.selected]
@@ -823,4 +846,120 @@ func _practice_shots(drill: String) -> void:
 	var t0 := Time.get_ticks_msec()
 	await get_tree().create_timer(3.0).timeout
 	get_viewport().get_texture().get_image().save_png("res://shots/practice_%s.png" % drill)
+	get_tree().quit()
+
+# Measured acceptance test: plays like a person (chase ball, tackle, call for passes) and reports each complaint as a number.
+func _qa(args: Array) -> void:
+	var mode_q := "legend"
+	var cam_q := "wide"
+	for a in args:
+		if a.begins_with("--mode="):
+			mode_q = a.substr(7)
+		if a.begins_with("--cam="):
+			cam_q = a.substr(6)
+	var h := _team_cfg(3, 66.0)
+	var a2 := _fix_clash(h, _team_cfg(4, 62.0))
+	var m := MatchScene.new()
+	m.cfg = {"home": h, "away": a2, "minutes": 3, "human_team": 0, "mode": mode_q, "diff": 1.0, "cam_style": cam_q, "no_replay": true,
+		"legend": {"name": "QA Bot", "slot": 9, "number": 10, "pace": 62, "shoot": 72, "pass": 52, "defend": 28}}
+	add_child(m)
+	var q := {"frames": 0, "ball_on": 0, "me_on": 0, "mates": 0, "carried": 0, "mine": 0, "tk_try": 0, "tk_win": 0, "chases": [], "calls": [], "ko_checked": 0, "ko_min": 99.0, "ko_circle": 0}
+	var vp := Vector2(1558, 720)
+	var chase_t := -1.0
+	var call_t := -1.0
+	var was_mine := false
+	var fin := [false]
+	m.finished.connect(func(_r): fin[0] = true)
+	var n := 0
+	while not fin[0] and n < 40000:
+		await get_tree().process_frame
+		n += 1
+		var dt := 3.0 / 60.0
+		if m.state == "FULLTIME":
+			m._send_finished(false)
+			continue
+		m.ui.stick_id = 999
+		var me: Player = m.controlled
+		var b: Ball = m.ball
+		if m.state == "KICKOFF" and m.state_t > 0.5 and q["ko_checked"] < 3:
+			q["ko_checked"] += 1
+			for i in m.players.size():
+				for j in range(i + 1, m.players.size()):
+					q["ko_min"] = minf(q["ko_min"], m.players[i].pos2().distance_to(m.players[j].pos2()))
+			for pl in m.players:
+				if pl.team != m.kicking_team and pl.pos2().length() < 9.15:
+					q["ko_circle"] += 1
+		if m.state != "PLAY":
+			if m.taker == me:
+				m.ui.just["A"] = true
+			continue
+		q["frames"] += 1
+		var vs := get_viewport().get_visible_rect().size
+		var scale_x := vs.x / vp.x
+		for item in [[b.position, "ball_on"], [me.position + Vector3(0, 1, 0), "me_on"]]:
+			var sp := m.cam.unproject_position(item[0])
+			if not m.cam.is_position_behind(item[0]) and sp.x > 0 and sp.x < vs.x and sp.y > 0 and sp.y < vs.y:
+				q[item[1]] += 1
+		var mates := 0
+		for t in m.teams_p[0]:
+			var sp2 := m.cam.unproject_position(t.position)
+			if t != me and not m.cam.is_position_behind(t.position) and sp2.x > 0 and sp2.x < vs.x and sp2.y > 0 and sp2.y < vs.y:
+				mates += 1
+		q["mates"] += mates
+		if b.carrier != null:
+			q["carried"] += 1
+		var c: Player = b.carrier
+		if c == me:
+			q["mine"] += 1
+		var to_b := Vector2(b.position.x - me.position.x, b.position.z - me.position.z)
+		var mine_team: bool = c != null and c.team == 0
+		# chase timing: how long from "ball is loose and near me" to having it
+		if c == null and to_b.length() < 12.0 and chase_t < 0.0:
+			chase_t = 0.0
+		if chase_t >= 0.0:
+			chase_t += dt
+			if c == me:
+				q["chases"].append(chase_t)
+				chase_t = -1.0
+			elif c != null or to_b.length() > 20.0:
+				chase_t = -1.0
+		if call_t >= 0.0:
+			call_t += dt
+			if m.pass_target == me or c == me:
+				q["calls"].append(call_t)
+				call_t = -1.0
+			elif not mine_team and b.carrier != null:
+				call_t = -1.0
+		if c == me:
+			var g := Vector2(m.attack_dir[0] * Cfg.HALF_L - me.position.x, -me.position.z)
+			m.ui.move = _stick_for(m, g)
+			if g.length() < 24.0 and n % 15 == 0:
+				m.ui.just["B"] = true
+				m.ui.rel["B"] = 0.5
+			elif n % 90 == 0:
+				m.ui.just["A"] = true
+		elif mine_team:
+			m.ui.move = _stick_for(m, Vector2(m.attack_dir[0], 0.0)) if n % 200 < 120 else Vector2.ZERO
+			if mode_q == "legend" and n % 20 == 0 and call_t < 0.0:
+				m.ui.just["Y"] = true
+				call_t = 0.0
+		else:
+			m.ui.move = _stick_for(m, to_b)
+			m.ui.held["S"] = true
+			if c != null and to_b.length() < 2.3 and n % 8 == 0:
+				q["tk_try"] += 1
+				var had: Player = c
+				m.ui.just["B"] = true
+				m._human_control(me, 0.0)
+				m.ui.just["B"] = false
+				if b.carrier == me:
+					q["tk_win"] += 1
+	var fr := float(maxi(q["frames"], 1))
+	var avg := func(arr): return 0.0 if arr.is_empty() else arr.reduce(func(x, y): return x + y, 0.0) / arr.size()
+	print("QA mode=%s cam=%s score=%s" % [mode_q, cam_q, m.score])
+	print("  ball on screen %.0f%% | my player on screen %.0f%% | teammates on screen avg %.1f" % [q["ball_on"] / fr * 100, q["me_on"] / fr * 100, q["mates"] / fr])
+	print("  ball under control %.0f%% | me on ball %.0f%%" % [q["carried"] / fr * 100, q["mine"] / fr * 100])
+	print("  tackles %d/%d | loose-ball pickups %d avg %.1fs" % [q["tk_win"], q["tk_try"], q["chases"].size(), avg.call(q["chases"])])
+	print("  calls made %d answered %d, avg response %.2fs (n=%d)" % [m.call_stats["calls"], m.call_stats["answered"], avg.call(q["calls"]), q["calls"].size()])
+	print("  kickoff: closest two players %.1fm, opponents inside circle %d" % [q["ko_min"], q["ko_circle"]])
 	get_tree().quit()

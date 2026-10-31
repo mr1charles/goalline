@@ -62,6 +62,8 @@ func _hit(p: Vector2) -> String:
 	var best := ""
 	var bd := 1e9
 	for k in cs:
+		if labels.get(k, "") == "":
+			continue
 		var d: float = p.distance_to(cs[k])
 		if d < _radius(k) * 1.2 and d < bd:
 			bd = d
@@ -145,6 +147,8 @@ func _draw() -> void:
 	var cs := _centers()
 	var op := clampf(opacity, 0.3, 1.0)
 	for k in cs:
+		if labels.get(k, "") == "":
+			continue
 		var r := _radius(k)
 		var c: Color = COLS[k]
 		var a := (0.55 if held[k] else 0.30) * op

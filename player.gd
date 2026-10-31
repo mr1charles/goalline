@@ -28,6 +28,7 @@ var ring: MeshInstance3D
 var visual: Node3D
 var gk_dive := 0.0
 var name_tag: Label3D
+var mate_mark: Label3D
 var skill_t := 0.0
 
 const RUN := 7.0
@@ -212,7 +213,7 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	name_tag = Label3D.new()
 	name_tag.text = pname
 	name_tag.font_size = 40
-	name_tag.pixel_size = 0.006
+	name_tag.pixel_size = 0.0095
 	name_tag.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	name_tag.outline_size = 10
 	name_tag.modulate = Color(1, 1, 1, 0.9)
@@ -220,6 +221,17 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	name_tag.no_depth_test = true
 	name_tag.visible = false
 	add_child(name_tag)
+	mate_mark = Label3D.new()
+	mate_mark.text = "▼"
+	mate_mark.font_size = 70
+	mate_mark.pixel_size = 0.0045
+	mate_mark.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	mate_mark.modulate = Color(0.35, 0.8, 1.0)
+	mate_mark.outline_size = 8
+	mate_mark.no_depth_test = true
+	mate_mark.position = Vector3(0, 2.45, 0)
+	mate_mark.visible = false
+	add_child(mate_mark)
 	is_gk = gk
 	visual.scale = Vector3(1.1, 1.1, 1.1)
 
