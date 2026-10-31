@@ -65,6 +65,7 @@ var prev_ball_x := 0.0
 var finished_sent := false
 var gk_hold_t := 0.0
 var dbg_t := 0.0
+var tel_t := 0.0
 
 func _ready() -> void:
 	mode = cfg.get("mode", "kickoff")
@@ -753,6 +754,7 @@ func _cheer_samples() -> PackedFloat32Array:
 func _set_state(s: String) -> void:
 	state = s
 	state_t = 0.0
+	Telemetry.ev("state", {"s": s, "score": score, "clock": snappedf(clock, 0.1)})
 
 func _set_controlled(p: Player) -> void:
 	if controlled != null:
@@ -847,6 +849,13 @@ func _physics_process(dt: float) -> void:
 	_update_camera(dt)
 	_update_hud(dt)
 	ui.end_frame()
+	tel_t += dt
+	if tel_t > 5.0:
+		tel_t = 0.0
+		var cp := controlled
+		Telemetry.ev("match_tick", {"state": state, "score": score, "clock": snappedf(clock, 0.1), "ball": [snappedf(ball.position.x, 0.1), snappedf(ball.position.z, 0.1)],
+			"me": [snappedf(cp.position.x, 0.1), snappedf(cp.position.z, 0.1)] if cp != null else null, "stam": snappedf(cp.stamina, 0.01) if cp != null else null,
+			"carrier": ball.carrier.pname if ball.carrier != null else "", "stick": [snappedf(ui.move.x, 0.01), snappedf(ui.move.y, 0.01)], "shots": shots})
 	if cfg.get("debug", false):
 		dbg_t += dt
 		if dbg_t > 10.0:
@@ -1485,6 +1494,7 @@ func _ball_out_end(side: int) -> void:
 	sfx_whistle.play()
 
 func _start_restart(kind: String, team: int, pos: Vector2) -> void:
+	Telemetry.ev("restart", {"kind": kind, "team": team})
 	restart_kind = kind
 	restart_team = team
 	restart_pos = pos
@@ -1567,6 +1577,7 @@ func _foul(def: Player, victim: Player) -> void:
 	var v: int = attack_dir[victim.team]
 	var pos := Vector2(clampf(victim.position.x, -Cfg.HALF_L + 1.0, Cfg.HALF_L - 1.0), clampf(victim.position.z, -Cfg.HALF_W + 1.0, Cfg.HALF_W - 1.0))
 	auto_log["fouls"] = auto_log.get("fouls", 0) + 1
+	Telemetry.ev("foul", {"def": def.pname, "victim": victim.pname})
 	sfx_whistle.play()
 	lbl_msg.text = "FOUL"
 	if v * pos.x > Cfg.HALF_L - 16.5 and absf(pos.y) < 20.16:
@@ -1591,6 +1602,7 @@ func _goal(side: int) -> void:
 				legend_stats["assists"] += 1
 	else:
 		celeb_player = teams_p[st][9]
+	Telemetry.ev("goal", {"team": st, "scorer": celeb_player.pname, "score": score, "minute": int(clock / match_len * 90.0)})
 	lbl_msg.text = "GOAL!"
 	lbl_sub.text = "%s  %d'" % [celeb_player.pname, int(clock / match_len * 90.0)]
 	sfx_cheer.play()

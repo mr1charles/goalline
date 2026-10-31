@@ -42,6 +42,7 @@ func _hit(p: Vector2) -> String:
 	return ""
 
 func _press(b: String) -> void:
+	Telemetry.ev("btn", {"b": b})
 	held[b] = true
 	just[b] = true
 	hold_t[b] = 0.0
@@ -61,6 +62,7 @@ func _input(event: InputEvent) -> void:
 				touches[event.index] = b
 				_press(b)
 			elif p.x < _vs().x * 0.5 and p.y > 90.0 and stick_id == -1:
+				Telemetry.ev("stick_start", {"x": int(p.x), "y": int(p.y), "vs": [int(_vs().x), int(_vs().y)]})
 				stick_id = event.index
 				stick_origin = p
 				stick_cur = p
@@ -81,6 +83,8 @@ func _input(event: InputEvent) -> void:
 			move = (d / 80.0).limit_length(1.0)
 			if move.length() < 0.12:
 				move = Vector2.ZERO
+			if Telemetry.inst != null:
+				Telemetry.inst.note_stick(move.length())
 
 func _process(dt: float) -> void:
 	for k in held:

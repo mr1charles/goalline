@@ -30,12 +30,33 @@ func _ready() -> void:
 		add_child(m)
 		m.finished.connect(func(r): print("SUMMARY goals=%d,%d shots=%d,%d on=%d,%d passes=%d,%d tackles=%d kicks=%d throw=%d corner=%d gk=%d" % [r["score"][0], r["score"][1], r["shots"][0], r["shots"][1], r["shots_on"][0], r["shots_on"][1], m.passes_done[0], m.passes_done[1], r["log"]["tackles"], r["log"]["kicks"], r["log"]["throwins"], r["log"]["corners"], r["log"]["goalkicks"]]); get_tree().quit())
 		return
+	if "--teltest" in args:
+		var tel := Telemetry.new()
+		add_child(tel)
+		tel.hosts.push_front("http://127.0.0.1:8799")
+		Telemetry.ev("hello", {"from": "teltest"})
+		push_error("teltest deliberate error")
+		push_warning("teltest deliberate warning")
+		var m := MatchScene.new()
+		var tm := Data.teams()
+		tm[0]["idx"] = 0
+		tm[1]["idx"] = 1
+		tm[0]["rs"] = {"att": 70, "mid": 70, "def": 70, "gk": 70, "fit": 70}
+		tm[1]["rs"] = tm[0]["rs"]
+		m.cfg = {"home": tm[0], "away": tm[1], "minutes": 1, "human_team": 0, "mode": "legend", "diff": 1.0, "legend": {"name": "T. Est", "slot": 9, "number": 9, "pace": 60, "shoot": 60, "pass": 60, "defend": 40}}
+		add_child(m)
+		tel.in_match = true
+		await get_tree().create_timer(14.0).timeout
+		get_tree().quit()
+		return
 	if "--careertest" in args:
 		Engine.time_scale = 30.0
 		Engine.max_physics_steps_per_frame = 60
 		_career_test()
 		return
 	_load_settings()
+	var tel := Telemetry.new()
+	add_child(tel)
 	ui_theme = _make_theme()
 	layer = CanvasLayer.new()
 	add_child(layer)
@@ -82,6 +103,7 @@ func _make_theme() -> Theme:
 	return t
 
 func _screen(title: String, sub := "") -> VBoxContainer:
+	Telemetry.ev("screen", {"name": title})
 	for c in root.get_children():
 		c.queue_free()
 	var bg := ColorRect.new()
@@ -161,11 +183,17 @@ func _fix_clash(h: Dictionary, a: Dictionary) -> Dictionary:
 	return a
 
 func _launch_match(cfgm: Dictionary, on_done: Callable) -> void:
+	Telemetry.ev("match_launch", {"mode": cfgm.get("mode"), "home": cfgm["home"].get("name"), "away": cfgm["away"].get("name"), "minutes": cfgm.get("minutes"), "tod": cfgm.get("tod", "auto")})
+	if Telemetry.inst != null:
+		Telemetry.inst.in_match = true
 	layer.visible = false
 	match_node = MatchScene.new()
 	match_node.cfg = cfgm
 	add_child(match_node)
 	match_node.finished.connect(func(r):
+		Telemetry.ev("match_end", {"score": r.get("score"), "rating": r.get("rating"), "quit": r.get("quit", false), "legend": r.get("legend"), "log": r.get("log")})
+		if Telemetry.inst != null:
+			Telemetry.inst.in_match = false
 		match_node.queue_free()
 		match_node = null
 		layer.visible = true
@@ -243,6 +271,15 @@ func _settings() -> void:
 	var mins := [2, 3, 4, 5, 8, 10]
 	_lab(inner, "Career match length (min)")
 	var o := _opt(inner, mins, mins.find(settings["minutes"]) if mins.has(settings["minutes"]) else 2)
+	var tel_cb := CheckBox.new()
+	tel_cb.text = "Send diagnostics to the developer's laptop (Wi-Fi)"
+	tel_cb.button_pressed = Telemetry.inst == null or Telemetry.inst.enabled
+	tel_cb.custom_minimum_size = Vector2(0, 56)
+	inner.add_child(tel_cb)
+	var host_le := LineEdit.new()
+	host_le.placeholder_text = "Log server (optional), e.g. http://192.168.1.129:8799"
+	host_le.custom_minimum_size = Vector2(0, 56)
+	inner.add_child(host_le)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 20)
 	vb.add_child(row)
@@ -254,6 +291,13 @@ func _settings() -> void:
 		Data.save_team_names(names)
 		settings["minutes"] = mins[o.selected]
 		_save_settings()
+		var tf := FileAccess.open("user://telemetry.json", FileAccess.WRITE)
+		if tf:
+			tf.store_string(JSON.stringify({"enabled": tel_cb.button_pressed, "host": host_le.text.strip_edges()}))
+		if Telemetry.inst != null:
+			Telemetry.inst.enabled = tel_cb.button_pressed
+			if host_le.text.strip_edges() != "":
+				Telemetry.inst.hosts.push_front(host_le.text.strip_edges())
 		_main_menu()).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 # ------------------------------------------------------------ career
