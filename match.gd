@@ -30,8 +30,10 @@ var restart_pos := Vector2.ZERO
 var ui: TouchUI
 var cam: Camera3D
 var cam_look := Vector3.ZERO
+var cam_fwd := Vector2(0, -1)
 var hud: CanvasLayer
 var lbl_score: Label
+var bug: ScoreBug
 var lbl_msg: Label
 var lbl_sub: Label
 var power_bar: ProgressBar
@@ -84,39 +86,85 @@ func _ready() -> void:
 			slot = int(cfg.get("legend", {}).get("slot", 9))
 		legend_player = teams_p[human_team][slot]
 		_set_controlled(legend_player)
+		if mode == "legend":
+			cam_fwd = Vector2(attack_dir[human_team], -0.3).normalized()
+			cam_look = legend_player.position
 	_set_state("KICKOFF")
 
 # ---------------------------------------------------------------- world
 
+
+const GRASS_SHADER := """
+shader_type spatial;
+uniform sampler2D tex : source_color, filter_linear_mipmap_anisotropic;
+float h(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+float n(vec2 p){ vec2 i = floor(p); vec2 f = fract(p); f = f*f*(3.0-2.0*f);
+	return mix(mix(h(i), h(i+vec2(1,0)), f.x), mix(h(i+vec2(0,1)), h(i+vec2(1,1)), f.x), f.y); }
+void fragment(){
+	vec3 c = texture(tex, UV).rgb;
+	float g = n(UV*520.0)*0.45 + n(UV*110.0)*0.35 + n(UV*22.0)*0.30;
+	c *= 0.84 + g*0.26;
+	ALBEDO = c;
+	ROUGHNESS = 1.0;
+}
+"""
+
 func _build_world() -> void:
 	var tod: String = cfg.get("tod", ["day", "dusk", "night"][int(tinfo[0].get("idx", 0)) % 3])
 	var env := Environment.new()
-	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color(0.42, 0.58, 0.82)
+	var sky := Sky.new()
+	var sm := ProceduralSkyMaterial.new()
+	sky.sky_material = sm
+	env.background_mode = Environment.BG_SKY
+	env.sky = sky
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-	env.ambient_light_color = Color(0.86, 0.89, 0.96)
-	env.ambient_light_energy = 0.75
+	var sun := DirectionalLight3D.new()
 	var sun_col := Color(1, 1, 1)
-	var sun_e := 1.05
+	var sun_e := 1.15
+	var sun_rot := Vector3(-50, 32, 0)
+	env.ambient_light_color = Color(0.62, 0.7, 0.86)
+	env.ambient_light_energy = 0.62
+	sm.sky_top_color = Color(0.2, 0.42, 0.8)
+	sm.sky_horizon_color = Color(0.72, 0.84, 0.96)
+	sm.ground_bottom_color = Color(0.2, 0.25, 0.22)
+	sm.ground_horizon_color = Color(0.6, 0.68, 0.72)
 	if tod == "dusk":
-		env.background_color = Color(0.9, 0.55, 0.38)
-		env.ambient_light_color = Color(0.78, 0.65, 0.72)
-		env.ambient_light_energy = 0.7
-		sun_col = Color(1.0, 0.72, 0.5)
-		sun_e = 0.95
+		sm.sky_top_color = Color(0.25, 0.3, 0.6)
+		sm.sky_horizon_color = Color(0.98, 0.62, 0.42)
+		sm.ground_horizon_color = Color(0.9, 0.6, 0.45)
+		env.ambient_light_color = Color(0.62, 0.52, 0.66)
+		env.ambient_light_energy = 0.55
+		sun_col = Color(1.0, 0.7, 0.46)
+		sun_e = 1.35
+		sun_rot = Vector3(-22, 62, 0)
 	elif tod == "night":
-		env.background_color = Color(0.03, 0.05, 0.13)
-		env.ambient_light_color = Color(0.5, 0.58, 0.8)
-		env.ambient_light_energy = 0.6
-		sun_col = Color(0.8, 0.85, 1.0)
-		sun_e = 0.7
+		sm.sky_top_color = Color(0.01, 0.02, 0.07)
+		sm.sky_horizon_color = Color(0.06, 0.08, 0.17)
+		sm.ground_horizon_color = Color(0.06, 0.08, 0.17)
+		sm.ground_bottom_color = Color(0.02, 0.03, 0.06)
+		env.ambient_light_color = Color(0.42, 0.5, 0.78)
+		env.ambient_light_energy = 0.5
+		sun_col = Color(0.75, 0.82, 1.0)
+		sun_e = 0.55
+		sun_rot = Vector3(-62, 20, 0)
+	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+	env.adjustment_enabled = true
+	env.adjustment_contrast = 1.08
+	env.adjustment_saturation = 1.04
+	env.glow_enabled = true
+	env.glow_intensity = 0.55
+	env.glow_bloom = 0.04
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
-	var sun := DirectionalLight3D.new()
-	sun.rotation_degrees = Vector3(-58, 35, 0)
+	sun.rotation_degrees = sun_rot
 	sun.light_energy = sun_e
 	sun.light_color = sun_col
+	sun.shadow_enabled = true
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
+	sun.directional_shadow_max_distance = 95.0
+	sun.shadow_bias = 0.04
+	sun.shadow_normal_bias = 1.0
 	add_child(sun)
 	if tod == "night":
 		_make_floodlights()
@@ -124,10 +172,11 @@ func _build_world() -> void:
 	var plane := PlaneMesh.new()
 	plane.size = Vector2(111, 74)
 	pm.mesh = plane
-	var mat := StandardMaterial3D.new()
-	mat.albedo_texture = _pitch_texture()
-	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	mat.roughness = 1.0
+	var sh := Shader.new()
+	sh.code = GRASS_SHADER
+	var mat := ShaderMaterial.new()
+	mat.shader = sh
+	mat.set_shader_parameter("tex", _pitch_texture())
 	pm.material_override = mat
 	add_child(pm)
 	var outer := MeshInstance3D.new()
@@ -136,7 +185,7 @@ func _build_world() -> void:
 	outer.mesh = op
 	outer.position.y = -0.04
 	var om := StandardMaterial3D.new()
-	om.albedo_color = Color(0.12, 0.33, 0.14)
+	om.albedo_color = Color(0.12, 0.3, 0.14)
 	outer.material_override = om
 	add_child(outer)
 	_make_goal(1)
@@ -145,9 +194,9 @@ func _build_world() -> void:
 	_make_stands()
 	cam = Camera3D.new()
 	cam.fov = 42.0
-	cam.near = 0.5
-	cam.far = 500.0
-	cam.position = Vector3(0, 22, 30)
+	cam.near = 0.4
+	cam.far = 600.0
+	cam.position = Vector3(0, 14, 26)
 	add_child(cam)
 	cam.make_current()
 	ball = Ball.new()
@@ -185,8 +234,8 @@ func _arc_m(img: Image, cx: float, cz: float, r: float, a0: float, a1: float, cl
 
 func _pitch_texture() -> ImageTexture:
 	var img := Image.create(1110, 740, false, Image.FORMAT_RGB8)
-	var c1 := Color(0.14, 0.50, 0.19)
-	var c2 := Color(0.17, 0.56, 0.22)
+	var c1 := Color(0.10, 0.39, 0.14)
+	var c2 := Color(0.15, 0.48, 0.18)
 	for i in 15:
 		var x0 := -55.5 + i * 7.4
 		_rect_m(img, x0, -37.0, x0 + 7.4, 37.0, c1 if i % 2 == 0 else c2)
@@ -262,50 +311,168 @@ func _make_floodlights() -> void:
 			_box(Vector3(0.6, 30, 0.6), Vector3(x, 15, z), pole)
 			for i in 3:
 				_box(Vector3(5, 1.4, 0.6), Vector3(x, 30.5 + i * 1.7, z), glow)
+			var sp := SpotLight3D.new()
+			sp.position = Vector3(x, 31, z)
+			sp.spot_range = 130.0
+			sp.spot_angle = 48.0
+			sp.light_energy = 4.0
+			sp.light_color = Color(1, 0.97, 0.88)
+			add_child(sp)
+			sp.look_at(Vector3(0, 0, 0))
+
 
 func _make_boards() -> void:
-	var m := StandardMaterial3D.new()
-	m.albedo_color = Color(0.1, 0.12, 0.25)
-	var m2 := StandardMaterial3D.new()
-	m2.albedo_color = Color(0.85, 0.15, 0.2)
-	_box(Vector3(116, 0.9, 0.25), Vector3(0, 0.45, -37.0), m)
-	_box(Vector3(116, 0.9, 0.25), Vector3(0, 0.45, 37.0), m)
-	_box(Vector3(0.25, 0.9, 76), Vector3(-57.5, 0.45, 0), m)
-	_box(Vector3(0.25, 0.9, 76), Vector3(57.5, 0.45, 0), m)
-	for i in 8:
-		_box(Vector3(6, 0.5, 0.27), Vector3(-42 + i * 12.0, 0.5, -37.0), m2)
-		_box(Vector3(6, 0.5, 0.27), Vector3(-42 + i * 12.0, 0.5, 37.0), m2)
+	var base := StandardMaterial3D.new()
+	base.albedo_color = Color(0.06, 0.07, 0.12)
+	var names := ["VOLTA", "NOVABANK", "ZEPHYR AIR", "KICKOFF TV", "ARCLIGHT", "MERIDIAN", "HALCYON", "ORBITAL"]
+	var cols := [Color(0.9, 0.2, 0.25), Color(0.15, 0.55, 0.95), Color(1.0, 0.75, 0.1), Color(0.2, 0.85, 0.5), Color(0.95, 0.4, 0.9), Color(0.95, 0.95, 0.95)]
+	# long sides
+	for side in [-1, 1]:
+		var z: float = side * (Cfg.HALF_W + 3.4)
+		_box(Vector3(118, 1.0, 0.3), Vector3(0, 0.5, z), base)
+		for i in 16:
+			var x := -56.0 + i * 7.5
+			var lab := Label3D.new()
+			lab.text = names[(i + (0 if side < 0 else 3)) % names.size()]
+			lab.font_size = 110
+			lab.pixel_size = 0.0075
+			lab.modulate = cols[(i + (0 if side < 0 else 2)) % cols.size()]
+			lab.outline_size = 6
+			lab.shaded = false
+			lab.position = Vector3(x, 0.55, z - side * 0.17)
+			if side > 0:
+				lab.rotation.y = PI
+			add_child(lab)
+	# ends
+	for side in [-1, 1]:
+		var x: float = side * (Cfg.HALF_L + 4.5)
+		_box(Vector3(0.3, 1.0, 76), Vector3(x, 0.5, 0), base)
+		for i in 9:
+			var z := -32.0 + i * 8.0
+			var lab := Label3D.new()
+			lab.text = names[(i + 2) % names.size()]
+			lab.font_size = 110
+			lab.pixel_size = 0.0075
+			lab.modulate = cols[(i + 1) % cols.size()]
+			lab.outline_size = 6
+			lab.shaded = false
+			lab.position = Vector3(x - side * 0.17, 0.55, z)
+			lab.rotation.y = -side * PI * 0.5
+			add_child(lab)
 
 func _crowd_texture() -> ImageTexture:
-	var img := Image.create(256, 64, false, Image.FORMAT_RGB8)
-	img.fill(Color(0.12, 0.12, 0.16))
+	var W := 1024
+	var H := 256
+	var img := Image.create(W, H, false, Image.FORMAT_RGB8)
+	img.fill(Color(0.09, 0.09, 0.12))
 	var r := RandomNumberGenerator.new()
-	r.seed = 99
-	for i in 1800:
-		var x := r.randi_range(0, 255)
-		var y := r.randi_range(0, 63)
-		var c := Color.from_hsv(r.randf(), r.randf_range(0.1, 0.7), r.randf_range(0.35, 0.95))
-		img.set_pixel(x, y, c)
-		img.set_pixel(mini(x + 1, 255), y, c)
+	r.seed = 77
+	var home: Color = tinfo[0]["c1"]
+	var away: Color = tinfo[1]["c1"]
+	var skins := [Color(0.85, 0.66, 0.52), Color(0.62, 0.43, 0.32), Color(0.4, 0.27, 0.2), Color(0.93, 0.78, 0.65)]
+	var row := 0
+	var y := 6
+	while y < H - 10:
+		if row % 9 == 8:
+			img.fill_rect(Rect2i(0, y, W, 5), Color(0.28, 0.28, 0.32))
+			y += 7
+			row += 1
+			continue
+		var x := 2
+		while x < W - 6:
+			var roll := r.randf()
+			var col: Color
+			if roll < 0.55:
+				col = home.lerp(Color(1, 1, 1), r.randf() * 0.2).darkened(0.25 + r.randf() * 0.35)
+			elif roll < 0.68:
+				col = away.darkened(0.3 + r.randf() * 0.3)
+			else:
+				col = Color.from_hsv(r.randf(), r.randf_range(0.0, 0.35), r.randf_range(0.18, 0.6))
+			img.fill_rect(Rect2i(x, y + 3, 5, 5), col)
+			img.fill_rect(Rect2i(x + 1, y, 3, 3), skins[r.randi() % 4])
+			x += 6
+		y += 8
+		row += 1
+	# aisles
+	for ax in range(100, W, 170):
+		img.fill_rect(Rect2i(ax, 0, 8, H), Color(0.34, 0.34, 0.38))
 	img.generate_mipmaps()
 	return ImageTexture.create_from_image(img)
+
+
+func _stand(center: Vector3, length: float, rise: float, run: float, yaw: float, mat: Material) -> void:
+	# slanted seating slab: bottom edge at `center`, rises by `rise` over `run` metres away from the pitch
+	var slope := sqrt(rise * rise + run * run)
+	var ang := atan2(rise, run)
+	var root := Node3D.new()
+	root.position = center
+	root.rotation.y = yaw
+	add_child(root)
+	var slab := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(length, 0.6, slope)
+	slab.mesh = bm
+	slab.material_override = mat
+	slab.position = Vector3(0, rise * 0.5, -run * 0.5)
+	slab.rotation.x = ang
+	root.add_child(slab)
+	var back := StandardMaterial3D.new()
+	back.albedo_color = Color(0.16, 0.16, 0.2)
+	var wall := MeshInstance3D.new()
+	var wm := BoxMesh.new()
+	wm.size = Vector3(length, rise + 3.0, 1.0)
+	wall.mesh = wm
+	wall.material_override = back
+	wall.position = Vector3(0, (rise + 3.0) * 0.5, -run - 0.5)
+	root.add_child(wall)
+	# roof
+	var roof_m := StandardMaterial3D.new()
+	roof_m.albedo_color = Color(0.2, 0.21, 0.25)
+	var roof := MeshInstance3D.new()
+	var rm := BoxMesh.new()
+	rm.size = Vector3(length, 0.5, run * 0.75)
+	roof.mesh = rm
+	roof.material_override = roof_m
+	roof.position = Vector3(0, rise + 3.2, -run * 0.5 - 1.0)
+	root.add_child(roof)
+	# trusses
+	var n := int(length / 22.0)
+	for i in n + 1:
+		var tx := -length * 0.5 + i * (length / maxf(n, 1))
+		var post := MeshInstance3D.new()
+		var pm := BoxMesh.new()
+		pm.size = Vector3(0.5, rise + 3.0, 0.5)
+		post.mesh = pm
+		post.material_override = roof_m
+		post.position = Vector3(tx, (rise + 3.0) * 0.5, -run * 0.8)
+		root.add_child(post)
+	# banner strip along the front
+	var banner := Label3D.new()
+	banner.text = BANNERS[int(abs(center.x + center.z)) % BANNERS.size()]
+	banner.font_size = 96
+	banner.pixel_size = 0.02
+	banner.modulate = Color(1, 1, 1)
+	banner.outline_size = 12
+	banner.outline_modulate = Color(0.6, 0.05, 0.1)
+	banner.position = Vector3(0, rise * 0.22 + 1.6, -run * 0.22 + 0.3)
+	banner.rotation.x = ang * 0.1
+	root.add_child(banner)
+
+const BANNERS := ["ONE CITY  ONE CLUB  ONE LOVE", "WE ARE GOALLINE", "FOREVER LOYAL  FOREVER HERE", "THE FINAL WHISTLE IS NEVER THE END"]
 
 func _make_stands() -> void:
 	var m := StandardMaterial3D.new()
 	m.albedo_texture = _crowd_texture()
-	m.uv1_scale = Vector3(10, 1, 1)
+	m.uv1_scale = Vector3(5, 3, 1)
 	m.roughness = 1.0
-	var tilt := deg_to_rad(38.0)
-	var s1 := _box(Vector3(120, 22, 1.5), Vector3(0, 10.5, -49.0), m)
-	s1.rotation.x = tilt
-	var s2 := _box(Vector3(120, 22, 1.5), Vector3(0, 10.5, 49.0), m)
-	s2.rotation.x = -tilt
-	var s3 := _box(Vector3(80, 22, 1.5), Vector3(-72.0, 10.5, 0), m)
-	s3.rotation = Vector3(0, deg_to_rad(90), 0)
-	s3.rotate_object_local(Vector3.RIGHT, -tilt)
-	var s4 := _box(Vector3(80, 22, 1.5), Vector3(72.0, 10.5, 0), m)
-	s4.rotation = Vector3(0, deg_to_rad(90), 0)
-	s4.rotate_object_local(Vector3.RIGHT, tilt)
+	m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	var rise := 22.0
+	var run := 30.0
+	# long sides (far side faces camera) and ends
+	_stand(Vector3(0, 0, -(Cfg.HALF_W + 9.0)), 135.0, rise, run, 0.0, m)
+	_stand(Vector3(0, 0, Cfg.HALF_W + 9.0), 135.0, rise, run, PI, m)
+	_stand(Vector3(-(Cfg.HALF_L + 15.0), 0, 0), 90.0, rise * 0.8, run * 0.8, PI * 0.5, m)
+	_stand(Vector3(Cfg.HALF_L + 15.0, 0, 0), 90.0, rise * 0.8, run * 0.8, -PI * 0.5, m)
 
 # ---------------------------------------------------------------- teams
 
@@ -333,7 +500,7 @@ func _build_teams() -> void:
 			if i == 0:
 				c1 = Color(0.95, 0.8, 0.1) if t == 0 else Color(0.2, 0.85, 0.35)
 				c2 = Color(0.1, 0.1, 0.1)
-			p.build(c1, c2, i == 0)
+			p.build(c1, c2, i == 0, int(ti.get("style", 0)))
 			p.stats = {"pas": _m(rt["mid"]), "sho": _m(rt["att"]), "tkl": _m(rt["def"]), "gk": _m(rt["gk"])}
 			p.spd_mult = 0.94 + float(rt["fit"]) / 100.0 * 0.12
 			if t != human_team and human_team >= 0:
@@ -345,7 +512,7 @@ func _build_teams() -> void:
 		var lg: Dictionary = cfg.get("legend", {})
 		var lp: Player = teams_p[human_team][int(lg.get("slot", 9))]
 		lp.pname = lg.get("name", "You")
-		lp.number = int(lg.get("number", 10))
+		lp.set_number(int(lg.get("number", 10)))
 		lp.spd_mult = 0.90 + float(lg.get("pace", 60)) / 100.0 * 0.2
 		lp.stats = {"pas": 0.75 + float(lg.get("pass", 60)) / 100.0 * 0.4,
 			"sho": 0.75 + float(lg.get("shoot", 60)) / 100.0 * 0.4,
@@ -369,10 +536,15 @@ func _build_hud() -> void:
 	ui = TouchUI.new()
 	hud.add_child(ui)
 	lbl_score = Label.new()
-	lbl_score.add_theme_font_size_override("font_size", 26)
-	lbl_score.add_theme_stylebox_override("normal", _style(Color(0.2, 0.08, 0.35, 0.85)))
-	lbl_score.position = Vector2(16, 12)
+	lbl_score.visible = false
 	hud.add_child(lbl_score)
+	bug = ScoreBug.new()
+	bug.m = self
+	bug.position = Vector2(14, 10)
+	bug.custom_minimum_size = Vector2(330, 74)
+	bug.size = Vector2(330, 74)
+	bug.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(bug)
 	lbl_msg = Label.new()
 	lbl_msg.add_theme_font_size_override("font_size", 64)
 	lbl_msg.add_theme_color_override("font_color", Color(1, 1, 1))
@@ -419,10 +591,10 @@ func _build_hud() -> void:
 	radar.anchor_right = 0.5
 	radar.anchor_top = 1.0
 	radar.anchor_bottom = 1.0
-	radar.offset_left = -105
-	radar.offset_right = 105
-	radar.offset_top = -108
-	radar.offset_bottom = -14
+	radar.offset_left = -90
+	radar.offset_right = 90
+	radar.offset_top = -78
+	radar.offset_bottom = -12
 	radar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(radar)
 	var pb := Button.new()
@@ -480,16 +652,16 @@ func _build_hud() -> void:
 	hud.add_child(end_panel)
 	marker = Label3D.new()
 	marker.text = "▼"
-	marker.font_size = 140
-	marker.pixel_size = 0.0035
+	marker.font_size = 90
+	marker.pixel_size = 0.0028
 	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	marker.modulate = Color(0.2, 1, 0.4)
 	marker.outline_size = 12
 	marker.no_depth_test = true
 	marker.position = Vector3(0, 2.8, 0)
 	add_child(marker)
-	stam_bg = _bar_quad(Color(0, 0, 0, 0.65), 1.3, 0.16)
-	stam_fill = _bar_quad(Color(0.3, 1, 0.4, 0.95), 1.24, 0.1)
+	stam_bg = _bar_quad(Color(0, 0, 0, 0.6), 1.1, 0.1)
+	stam_fill = _bar_quad(Color(0.3, 1, 0.4, 0.95), 1.04, 0.06)
 	add_child(stam_bg)
 	add_child(stam_fill)
 
@@ -593,8 +765,8 @@ func _set_controlled(p: Player) -> void:
 		if marker.get_parent() != null:
 			marker.get_parent().remove_child(marker)
 		p.add_child(marker)
-		marker.position = Vector3(0, 3.0, 0)
-		marker.text = "▼\n%s" % p.pname if mode == "legend" else "▼"
+		marker.position = Vector3(0, 2.5, 0)
+		marker.text = "▼"
 
 func _shape_depth_shift(t: int) -> float:
 	var dir: int = attack_dir[t]
@@ -658,6 +830,8 @@ func _physics_process(dt: float) -> void:
 	if Input.is_key_pressed(KEY_ESCAPE) and state_t > 0.3:
 		pass
 	match state:
+		"INTRO":
+			_tick_intro(dt)
 		"KICKOFF", "RESTART":
 			_tick_restart(dt)
 		"PLAY":
@@ -744,6 +918,14 @@ func _tick_play(dt: float) -> void:
 		sfx_whistle.play()
 	elif half == 2 and clock >= match_len:
 		_full_time()
+
+func _tick_intro(_dt: float) -> void:
+	_hold_ball_for_taker()
+	var skip = ui.just["A"] or ui.just["B"] or ui.just["X"] or ui.just["Y"]
+	if state_t > 4.2 or (skip and state_t > 0.5):
+		lbl_msg.text = ""
+		lbl_sub.text = ""
+		_set_state("KICKOFF")
 
 func _tick_restart(dt: float) -> void:
 	# taker holds the ball; others take shape
@@ -1488,8 +1670,13 @@ func _manual_switch() -> void:
 	if best != null:
 		_set_controlled(best)
 
+func _stick_to_world(v: Vector2) -> Vector2:
+	var f := cam_fwd
+	var r := Vector2(-f.y, f.x)
+	return (f * (-v.y) + r * v.x).limit_length(1.0)
+
 func _human_control(p: Player, dt: float) -> void:
-	var mv := ui.move
+	var mv := _stick_to_world(ui.move)
 	var has = ball.carrier == p
 	p.move_cmd = mv
 	p.want_sprint = ui.held["S"]
@@ -1814,28 +2001,45 @@ func _ai_gk(p: Player, dt: float) -> void:
 
 # ---------------------------------------------------------------- camera / hud
 
+
 func _update_camera(dt: float) -> void:
 	var look := Vector3.ZERO
-	var offs := Vector3(0, 22, 30)
-	var fov_t := 42.0
+	var pos_off := Vector3(0, 13.0, 26.0)
+	var fov_t := 40.0
+	var target_fwd := Vector2(0, -1)
+	var follow := true
+	if state == "INTRO":
+		var a := state_t * 0.32 - 0.6
+		cam.position = Vector3(sin(a) * 78.0, 22.0 + state_t * 1.5, cos(a) * 52.0)
+		cam.look_at(Vector3(0, 2, 0), Vector3.UP)
+		cam.fov = 52.0
+		return
 	if state == "GOAL" and celeb_player != null:
 		look = celeb_player.position + Vector3(0, 1.2, 0)
-		offs = Vector3(5, 3.5, 9)
+		pos_off = Vector3(5, 2.6, 8)
 		fov_t = 34.0
 	elif state == "REPLAY":
 		look = ball.position
-		offs = Vector3(0, 9.0, 15.0)
+		pos_off = Vector3(0, 8.0, 15.0)
 		fov_t = 40.0
-	elif mode == "legend" and controlled != null:
-		var f := controlled.position * 0.72 + ball.position * 0.28
-		look = Vector3(f.x, 0, f.z)
-		offs = Vector3(0, 8.5, 13.5)
-		fov_t = 52.0
+	elif mode == "legend" and controlled != null and human_team >= 0:
+		var dirv: int = attack_dir[human_team]
+		target_fwd = Vector2(dirv, -0.3).normalized()
+		cam_fwd = cam_fwd.lerp(target_fwd, clampf(2.5 * dt, 0.0, 1.0)).normalized()
+		var f3 := Vector3(cam_fwd.x, 0, cam_fwd.y)
+		var focus := controlled.position + (ball.position - controlled.position).limit_length(7.0) * 0.5 + f3 * 5.0
+		focus.y = 0.8
+		cam_look = cam_look.lerp(focus, clampf(7.0 * dt, 0.0, 1.0))
+		cam.position = cam_look - f3 * 14.0 + Vector3(0, 6.6, 0)
+		cam.look_at(cam_look + f3 * 6.0 + Vector3(0, 0.2, 0), Vector3.UP)
+		cam.fov = lerpf(cam.fov, 52.0, clampf(3.0 * dt, 0.0, 1.0))
+		return
 	else:
 		var bpos := ball.position
 		look = Vector3(clampf(bpos.x + ball.vel.x * 0.18, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, bpos.z * 0.35)
+		cam_fwd = Vector2(0, -1)
 	cam_look = cam_look.lerp(look, clampf(4.0 * dt, 0.0, 1.0))
-	cam.position = cam_look + offs
+	cam.position = cam_look + pos_off
 	cam.look_at(cam_look, Vector3.UP)
 	cam.fov = lerpf(cam.fov, fov_t, clampf(3.0 * dt, 0.0, 1.0))
 
@@ -1850,15 +2054,16 @@ func _update_tags() -> void:
 	stam_bg.position = c.position + Vector3(0, 0.15, 1.0)
 	var st := clampf(c.stamina, 0.02, 1.0)
 	stam_fill.scale = Vector3(st, 1, 1)
-	stam_fill.position = c.position + Vector3(-(1.0 - st) * 0.62, 0.16, 1.0)
+	stam_fill.position = c.position + Vector3(-(1.0 - st) * 0.52, 0.16, 1.0)
 	(stam_fill.material_override as StandardMaterial3D).albedo_color = Color(1.0 - st * 0.7, 0.3 + st * 0.7, 0.3, 0.95)
 	var ref := c.pos2()
 	for p in players:
-		var show: bool = p == ball.carrier or (p.pos2().distance_to(ref) < 11.0 and p != c)
+		var show: bool = p == c or p == ball.carrier or (p.pos2().distance_to(ref) < 11.0)
 		p.name_tag.visible = show
 		if show:
-			p.name_tag.text = p.pname.get_slice(" ", 1) if " " in p.pname else p.pname
-			p.name_tag.modulate = tinfo[p.team]["c1"].lightened(0.45)
+			p.name_tag.text = p.pname if p == c else (p.pname.get_slice(" ", 1) if " " in p.pname else p.pname)
+			p.name_tag.modulate = Color(0.35, 1.0, 0.5) if p == c else tinfo[p.team]["c1"].lightened(0.55)
+			p.name_tag.position = Vector3(0, 2.95 if p == c else 2.5, 0)
 
 func _update_hud(_dt: float) -> void:
 	_update_tags()

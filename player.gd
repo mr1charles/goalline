@@ -61,11 +61,36 @@ func _box_mesh(sx: float, sy: float, sz: float) -> BoxMesh:
 	b.size = Vector3(sx, sy, sz)
 	return b
 
-func build(c1: Color, c2: Color, gk: bool) -> void:
+func _kit_tex(c1: Color, c2: Color, style: int) -> ImageTexture:
+	var img := Image.create(64, 64, false, Image.FORMAT_RGB8)
+	img.fill(c1)
+	if style == 1:
+		for x in range(0, 64, 16):
+			img.fill_rect(Rect2i(x + 8, 0, 8, 64), c2)
+	elif style == 2:
+		for y in range(0, 64, 16):
+			img.fill_rect(Rect2i(0, y + 8, 64, 8), c2)
+	elif style == 3:
+		img.fill_rect(Rect2i(32, 0, 32, 64), c2)
+	img.generate_mipmaps()
+	return ImageTexture.create_from_image(img)
+
+var num_label: Label3D
+var kit_style := 0
+
+func set_number(n: int) -> void:
+	number = n
+	if num_label != null:
+		num_label.text = str(n)
+
+func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	visual = Node3D.new()
 	add_child(visual)
 	var skin := Color(0.86, 0.67, 0.53).lerp(Color(0.45, 0.3, 0.22), float((idx * 7 + team * 3) % 5) / 6.0)
 	var shirt := _mat(c1)
+	if style != 0 and not gk:
+		shirt.albedo_texture = _kit_tex(c1, c2, style)
+		shirt.albedo_color = Color(1, 1, 1)
 	var shorts_m := _mat(c2)
 	var skin_m := _mat(skin)
 	var sock_m := _mat(c1 if not gk else Color(0.1, 0.1, 0.1))
@@ -75,6 +100,18 @@ func build(c1: Color, c2: Color, gk: bool) -> void:
 	cap.radius = 0.3
 	cap.height = 0.95
 	body = _part(cap, Vector3(0, 1.22, 0), shirt, visual)
+	body.scale = Vector3(1.18, 1.0, 0.82)
+	var lum := c1.r * 0.3 + c1.g * 0.59 + c1.b * 0.11
+	num_label = Label3D.new()
+	num_label.text = str(number)
+	num_label.font_size = 150
+	num_label.pixel_size = 0.0036
+	num_label.modulate = Color(0.05, 0.05, 0.08) if lum > 0.55 else Color(1, 1, 1)
+	num_label.outline_size = 0
+	num_label.position = Vector3(0, 1.25, -0.27)
+	num_label.rotation.y = PI
+	num_label.shaded = false
+	visual.add_child(num_label)
 	# shorts
 	_part(_box_mesh(0.52, 0.32, 0.34), Vector3(0, 0.82, 0), shorts_m, visual)
 	# head + hair

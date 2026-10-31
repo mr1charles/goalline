@@ -4,14 +4,14 @@ extends RefCounted
 # Fictional clubs only (no licences). Names are editable in Settings.
 static func default_teams() -> Array:
 	return [
-		{"name": "Harbor Rovers", "short": "HAR", "c1": Color(0.86, 0.12, 0.14), "c2": Color(1, 1, 1), "rating": 70},
-		{"name": "Northgate United", "short": "NOR", "c1": Color(0.10, 0.30, 0.80), "c2": Color(1, 1, 1), "rating": 74},
-		{"name": "Riverside City", "short": "RIV", "c1": Color(0.45, 0.78, 0.95), "c2": Color(0.05, 0.1, 0.3), "rating": 78},
-		{"name": "Kingsford Athletic", "short": "KIN", "c1": Color(0.95, 0.80, 0.10), "c2": Color(0.1, 0.1, 0.1), "rating": 66},
-		{"name": "Redwood FC", "short": "RED", "c1": Color(0.55, 0.08, 0.10), "c2": Color(0.95, 0.85, 0.3), "rating": 62},
-		{"name": "Valley Town", "short": "VAL", "c1": Color(0.10, 0.55, 0.28), "c2": Color(1, 1, 1), "rating": 58},
-		{"name": "Ironbridge", "short": "IRO", "c1": Color(0.25, 0.25, 0.30), "c2": Color(0.9, 0.4, 0.1), "rating": 68},
-		{"name": "Seaview Albion", "short": "SEA", "c1": Color(0.95, 0.95, 0.95), "c2": Color(0.1, 0.35, 0.7), "rating": 64},
+		{"name": "Harbor Rovers", "style": 0, "short": "HAR", "c1": Color(0.86, 0.12, 0.14), "c2": Color(1, 1, 1), "rating": 70},
+		{"name": "Northgate United", "style": 1, "short": "NOR", "c1": Color(0.10, 0.30, 0.80), "c2": Color(1, 1, 1), "rating": 74},
+		{"name": "Riverside City", "style": 0, "short": "RIV", "c1": Color(0.45, 0.78, 0.95), "c2": Color(0.05, 0.1, 0.3), "rating": 78},
+		{"name": "Kingsford Athletic", "style": 2, "short": "KIN", "c1": Color(0.95, 0.80, 0.10), "c2": Color(0.1, 0.1, 0.1), "rating": 66},
+		{"name": "Redwood FC", "style": 1, "short": "RED", "c1": Color(0.55, 0.08, 0.10), "c2": Color(0.95, 0.85, 0.3), "rating": 62},
+		{"name": "Valley Town", "style": 3, "short": "VAL", "c1": Color(0.10, 0.55, 0.28), "c2": Color(1, 1, 1), "rating": 58},
+		{"name": "Ironbridge", "style": 0, "short": "IRO", "c1": Color(0.25, 0.25, 0.30), "c2": Color(0.9, 0.4, 0.1), "rating": 68},
+		{"name": "Seaview Albion", "style": 2, "short": "SEA", "c1": Color(0.95, 0.95, 0.95), "c2": Color(0.1, 0.35, 0.7), "rating": 64},
 	]
 
 static func teams() -> Array:

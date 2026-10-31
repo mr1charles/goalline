@@ -16,12 +16,15 @@ var touch_active := false
 
 const KEYS := {"A": KEY_J, "B": KEY_K, "X": KEY_L, "Y": KEY_I, "S": KEY_SHIFT, "Z": KEY_SPACE}
 
+func _vs() -> Vector2:
+	return get_viewport_rect().size
+
 func _ready() -> void:
-	set_anchors_preset(Control.PRESET_FULL_RECT)
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 func _centers() -> Dictionary:
-	var s := size
+	var s := _vs()
 	var c := Vector2(s.x - 190.0, s.y - 150.0)
 	return {
 		"A": c + Vector2(0, 78), "B": c + Vector2(78, 0),
@@ -57,7 +60,7 @@ func _input(event: InputEvent) -> void:
 			if b != "":
 				touches[event.index] = b
 				_press(b)
-			elif p.x < size.x * 0.5 and p.y > 90.0 and stick_id == -1:
+			elif p.x < _vs().x * 0.5 and p.y > 90.0 and stick_id == -1:
 				stick_id = event.index
 				stick_origin = p
 				stick_cur = p
@@ -122,5 +125,5 @@ func _draw() -> void:
 		draw_arc(stick_origin, 70.0, 0, TAU, 32, Color(1, 1, 1, 0.5), 2.0)
 		draw_circle(stick_cur, 34.0, Color(1, 1, 1, 0.4))
 	elif touch_active:
-		draw_circle(Vector2(150, size.y - 140), 70.0, Color(1, 1, 1, 0.07))
-		draw_arc(Vector2(150, size.y - 140), 70.0, 0, TAU, 32, Color(1, 1, 1, 0.3), 2.0)
+		draw_circle(Vector2(150, _vs().y - 140), 70.0, Color(1, 1, 1, 0.07))
+		draw_arc(Vector2(150, _vs().y - 140), 70.0, 0, TAU, 32, Color(1, 1, 1, 0.3), 2.0)
