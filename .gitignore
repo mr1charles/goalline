@@ -1,0 +1,7 @@
+.godot/
+build/
+shots/
+ref/
+ref2/
+*.import
+*.tmp

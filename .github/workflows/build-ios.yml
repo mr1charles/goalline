@@ -1,0 +1,77 @@
+name: Build iOS IPA (unsigned)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Godot + templates
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/godot-bin
+            ~/Library/Application Support/Godot/export_templates
+          key: godot-${{ env.GODOT_VERSION }}-ios-v1
+
+      - name: Install Godot and iOS templates
+        run: |
+          set -e
+          if [ ! -x "$HOME/godot-bin/Godot.app/Contents/MacOS/Godot" ]; then
+            mkdir -p "$HOME/godot-bin"
+            curl -fsSL -o /tmp/godot.zip "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_macos.universal.zip"
+            unzip -q /tmp/godot.zip -d "$HOME/godot-bin"
+          fi
+          TPL="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable"
+          if [ ! -f "$TPL/ios.zip" ]; then
+            mkdir -p "$TPL"
+            curl -fsSL -o /tmp/tpl.tpz "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+            unzip -q -j /tmp/tpl.tpz "templates/ios.zip" "templates/version.txt" -d "$TPL"
+          fi
+          ls -la "$TPL"
+
+      - name: Export Xcode project
+        run: |
+          set -e
+          GODOT="$HOME/godot-bin/Godot.app/Contents/MacOS/Godot"
+          mkdir -p build/ios
+          "$GODOT" --headless --path . --import || true
+          "$GODOT" --headless --path . --export-release "iOS" build/ios/Goalline.ipa || true
+          ls build/ios
+
+      - name: Build (unsigned)
+        run: |
+          set -e
+          xcodebuild -project build/ios/Goalline.xcodeproj -scheme Goalline \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build/dd \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" build | tail -40
+          APP=$(find build/dd/Build/Products -name "*.app" -maxdepth 3 | head -1)
+          echo "APP=$APP"
+          rm -rf build/pkg && mkdir -p build/pkg/Payload
+          cp -R "$APP" build/pkg/Payload/
+          (cd build/pkg && zip -qr ../Goalline.ipa Payload)
+          ls -lh build/Goalline.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Goalline-ipa
+          path: build/Goalline.ipa
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" build/Goalline.ipa --title "Goalline build ${GITHUB_RUN_NUMBER}" --notes "Unsigned IPA. Sign/sideload it (LiveContainer, AltStore, DockBox)." --repo "$GITHUB_REPOSITORY"
