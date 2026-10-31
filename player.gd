@@ -86,7 +86,7 @@ func set_number(n: int) -> void:
 func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	visual = Node3D.new()
 	add_child(visual)
-	var skin := Color(0.86, 0.67, 0.53).lerp(Color(0.45, 0.3, 0.22), float((idx * 7 + team * 3) % 5) / 6.0)
+	var skin := Color(0.9, 0.72, 0.58).lerp(Color(0.32, 0.2, 0.15), float((idx * 7 + team * 3) % 6) / 5.0)
 	var shirt := _mat(c1)
 	if style != 0 and not gk:
 		shirt.albedo_texture = _kit_tex(c1, c2, style)
@@ -122,8 +122,37 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	var hair := SphereMesh.new()
 	hair.radius = 0.2
 	hair.height = 0.26
-	var hair_cols := [Color(0.08, 0.06, 0.05), Color(0.35, 0.22, 0.1), Color(0.75, 0.6, 0.3), Color(0.15, 0.1, 0.08)]
-	_part(hair, Vector3(0, 1.9, -0.02), _mat(hair_cols[(idx + team) % 4]), visual)
+	var hair_cols := [Color(0.08, 0.06, 0.05), Color(0.35, 0.22, 0.1), Color(0.75, 0.6, 0.3), Color(0.15, 0.1, 0.08), Color(0.5, 0.3, 0.15)]
+	var hstyle := (idx * 3 + team * 2) % 6
+	var hmat := _mat(hair_cols[(idx + team) % hair_cols.size()])
+	if hstyle != 5:
+		_part(hair, Vector3(0, 1.9, -0.02), hmat, visual)
+	if hstyle == 1:
+		var bun := SphereMesh.new()
+		bun.radius = 0.09
+		bun.height = 0.18
+		_part(bun, Vector3(0, 2.08, -0.08), hmat, visual)
+	elif hstyle == 2:
+		var curl := SphereMesh.new()
+		curl.radius = 0.24
+		curl.height = 0.3
+		_part(curl, Vector3(0, 1.93, -0.02), hmat, visual)
+	if hstyle == 3 or hstyle == 4:
+		var beard := SphereMesh.new()
+		beard.radius = 0.17
+		beard.height = 0.22
+		_part(beard, Vector3(0, 1.74, 0.07), hmat, visual)
+	# face: eyes + nose
+	var eye := SphereMesh.new()
+	eye.radius = 0.028
+	eye.height = 0.056
+	var eye_m := _mat(Color(0.05, 0.05, 0.06), 0.3)
+	_part(eye, Vector3(-0.07, 1.84, 0.17), eye_m, visual)
+	_part(eye, Vector3(0.07, 1.84, 0.17), eye_m, visual)
+	var nose := SphereMesh.new()
+	nose.radius = 0.035
+	nose.height = 0.07
+	_part(nose, Vector3(0, 1.78, 0.19), skin_m, visual)
 	# legs (pivot at the hip)
 	for side in [-1, 1]:
 		var pivot := Node3D.new()

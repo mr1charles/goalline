@@ -2048,8 +2048,11 @@ func _update_camera(dt: float) -> void:
 		return
 	else:
 		var bpos := ball.position
-		look = Vector3(clampf(bpos.x + ball.vel.x * 0.18, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, bpos.z * 0.35)
-		cam_fwd = Vector2(0, -1)
+		var dd: int = attack_dir[maxi(human_team, 0)]
+		look = Vector3(clampf(bpos.x + ball.vel.x * 0.18 + dd * 5.0, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, bpos.z * 0.35)
+		pos_off = Vector3(-dd * 8.0, 27.0, 28.0)
+		fov_t = 42.0
+		cam_fwd = cam_fwd.lerp(Vector2(dd * 7.0, -22.0).normalized(), clampf(2.5 * dt, 0.0, 1.0)).normalized()
 	cam_look = cam_look.lerp(look, clampf(4.0 * dt, 0.0, 1.0))
 	cam.position = cam_look + pos_off
 	cam.look_at(cam_look, Vector3.UP)
