@@ -35,50 +35,81 @@ const SPRINT := 9.2
 const ACCEL := 24.0
 const DECEL := 32.0
 
+var leg_l: Node3D
+var leg_r: Node3D
+var arm_l: Node3D
+var arm_r: Node3D
+var kick_anim := 0.0
+var celebrate := false
+
+func _mat(c: Color, rough := 0.85) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	m.roughness = rough
+	return m
+
+func _part(mesh: Mesh, pos: Vector3, mat: Material, parent: Node3D) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.position = pos
+	mi.material_override = mat
+	parent.add_child(mi)
+	return mi
+
+func _box_mesh(sx: float, sy: float, sz: float) -> BoxMesh:
+	var b := BoxMesh.new()
+	b.size = Vector3(sx, sy, sz)
+	return b
+
 func build(c1: Color, c2: Color, gk: bool) -> void:
 	visual = Node3D.new()
 	add_child(visual)
-	body = MeshInstance3D.new()
+	var skin := Color(0.86, 0.67, 0.53).lerp(Color(0.45, 0.3, 0.22), float((idx * 7 + team * 3) % 5) / 6.0)
+	var shirt := _mat(c1)
+	var shorts_m := _mat(c2)
+	var skin_m := _mat(skin)
+	var sock_m := _mat(c1 if not gk else Color(0.1, 0.1, 0.1))
+	var boot_m := _mat(Color(0.08, 0.08, 0.08), 0.5)
+	# torso
 	var cap := CapsuleMesh.new()
-	cap.radius = 0.36
-	cap.height = 1.5
-	body.mesh = cap
-	body.position.y = 0.95
-	var m := StandardMaterial3D.new()
-	m.albedo_color = c1
-	m.roughness = 0.8
-	body.material_override = m
-	visual.add_child(body)
-	var shorts := MeshInstance3D.new()
-	var sc := CylinderMesh.new()
-	sc.top_radius = 0.37
-	sc.bottom_radius = 0.37
-	sc.height = 0.4
-	shorts.mesh = sc
-	shorts.position.y = 0.55
-	var sm := StandardMaterial3D.new()
-	sm.albedo_color = c2
-	shorts.material_override = sm
-	visual.add_child(shorts)
-	var head := MeshInstance3D.new()
+	cap.radius = 0.3
+	cap.height = 0.95
+	body = _part(cap, Vector3(0, 1.22, 0), shirt, visual)
+	# shorts
+	_part(_box_mesh(0.52, 0.32, 0.34), Vector3(0, 0.82, 0), shorts_m, visual)
+	# head + hair
 	var hs := SphereMesh.new()
-	hs.radius = 0.2
-	hs.height = 0.4
-	head.mesh = hs
-	head.position.y = 1.85
-	var hm := StandardMaterial3D.new()
-	hm.albedo_color = Color(0.85, 0.66, 0.52)
-	head.material_override = hm
-	visual.add_child(head)
-	var nose := MeshInstance3D.new()
-	var nb := BoxMesh.new()
-	nb.size = Vector3(0.18, 0.12, 0.22)
-	nose.mesh = nb
-	nose.position = Vector3(0, 1.1, 0.34)
-	var nm := StandardMaterial3D.new()
-	nm.albedo_color = c2
-	nose.material_override = nm
-	visual.add_child(nose)
+	hs.radius = 0.19
+	hs.height = 0.38
+	_part(hs, Vector3(0, 1.82, 0), skin_m, visual)
+	var hair := SphereMesh.new()
+	hair.radius = 0.2
+	hair.height = 0.26
+	var hair_cols := [Color(0.08, 0.06, 0.05), Color(0.35, 0.22, 0.1), Color(0.75, 0.6, 0.3), Color(0.15, 0.1, 0.08)]
+	_part(hair, Vector3(0, 1.9, -0.02), _mat(hair_cols[(idx + team) % 4]), visual)
+	# legs (pivot at the hip)
+	for side in [-1, 1]:
+		var pivot := Node3D.new()
+		pivot.position = Vector3(side * 0.14, 0.74, 0)
+		visual.add_child(pivot)
+		_part(_box_mesh(0.15, 0.36, 0.17), Vector3(0, -0.2, 0), skin_m, pivot)
+		_part(_box_mesh(0.15, 0.34, 0.17), Vector3(0, -0.55, 0), sock_m, pivot)
+		_part(_box_mesh(0.16, 0.1, 0.26), Vector3(0, -0.74, 0.04), boot_m, pivot)
+		if side < 0:
+			leg_l = pivot
+		else:
+			leg_r = pivot
+	# arms (pivot at the shoulder)
+	for side in [-1, 1]:
+		var ap := Node3D.new()
+		ap.position = Vector3(side * 0.38, 1.5, 0)
+		visual.add_child(ap)
+		_part(_box_mesh(0.12, 0.3, 0.13), Vector3(0, -0.14, 0), shirt, ap)
+		_part(_box_mesh(0.1, 0.3, 0.11), Vector3(0, -0.4, 0), skin_m if not gk else _mat(Color(0.9, 0.9, 0.2)), ap)
+		if side < 0:
+			arm_l = ap
+		else:
+			arm_r = ap
 	ring = MeshInstance3D.new()
 	var rc := CylinderMesh.new()
 	rc.top_radius = 0.95
@@ -119,7 +150,7 @@ func build(c1: Color, c2: Color, gk: bool) -> void:
 	name_tag.visible = false
 	add_child(name_tag)
 	is_gk = gk
-	visual.scale = Vector3(1.12, 1.12, 1.12)
+	visual.scale = Vector3(1.1, 1.1, 1.1)
 
 func pos2() -> Vector2:
 	return Vector2(position.x, position.z)
@@ -167,10 +198,29 @@ func step(dt: float, has_ball: bool) -> void:
 	run_t += sp * dt * 1.2
 	var bob := absf(sin(run_t)) * 0.07 * clampf(sp / 6.0, 0.0, 1.0)
 	visual.position.y = bob
-	var lean := clampf(sp / 9.0, 0.0, 1.0) * 0.28
+	var lean := clampf(sp / 9.0, 0.0, 1.0) * 0.22
 	if slide_t > 0.0:
 		lean = 1.2
 	visual.rotation.x = lean
+	kick_anim = maxf(0.0, kick_anim - dt)
+	var amp := clampf(sp / 6.5, 0.0, 1.0) * 1.0
+	var sw := sin(run_t * 1.6)
+	if slide_t > 0.0:
+		leg_l.rotation.x = -1.3
+		leg_r.rotation.x = -0.4
+		arm_l.rotation.x = 0.4
+		arm_r.rotation.x = 0.4
+	else:
+		leg_l.rotation.x = sw * amp
+		leg_r.rotation.x = -sw * amp
+		arm_l.rotation.x = -sw * amp * 0.8
+		arm_r.rotation.x = sw * amp * 0.8
+		if kick_anim > 0.0:
+			leg_r.rotation.x = -1.5 * (kick_anim / 0.25)
+			arm_l.rotation.x = 0.8
+		if celebrate:
+			arm_l.rotation.x = -3.0
+			arm_r.rotation.x = -3.0
 	visual.rotation.y = sin(skill_t * 22.0) * 0.6 if skill_t > 0.0 else 0.0
 	if is_gk and gk_dive != 0.0:
 		visual.rotation.z = gk_dive

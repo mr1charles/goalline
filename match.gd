@@ -624,6 +624,8 @@ func _reset_positions() -> void:
 		p.face = Vector2(dir, 0)
 
 func _reset_kickoff(team: int) -> void:
+	for pl in players:
+		pl.celebrate = false
 	kicking_team = team
 	_reset_positions()
 	ball.carrier = null
@@ -783,6 +785,7 @@ func _tick_goal(dt: float) -> void:
 			celeb_player.want_sprint = true
 		elif not celeb_slid:
 			celeb_slid = true
+			celeb_player.celebrate = true
 			celeb_player.slide_t = 1.0
 			celeb_player.vel = Vector3(celeb_player.face.x * 7.0, 0, celeb_player.face.y * 7.0)
 		else:
@@ -962,7 +965,7 @@ func _separate_players() -> void:
 
 func _carry(dt: float) -> void:
 	var c: Player = ball.carrier
-	var lead := 0.78 + c.speed() * 0.05
+	var lead := 0.62 + c.speed() * 0.05 + 0.34 * (0.5 + 0.5 * sin(c.run_t * 1.6)) * clampf(c.speed() / 4.0, 0.0, 1.0)
 	var target := Vector3(c.position.x + c.face.x * lead, Cfg.BALL_R, c.position.z + c.face.y * lead)
 	ball.position = ball.position.lerp(target, clampf(16.0 * dt, 0.0, 1.0))
 	ball.vel = c.vel
@@ -1184,6 +1187,7 @@ func _kick_to_point(p: Player, tgt: Vector2, kind: String, rcv) -> void:
 	ball.position = Vector3(p.position.x + dd.x * 0.5, Cfg.BALL_R + 0.1, p.position.z + dd.y * 0.5)
 	ball.kick(Vector3(dd.x * hs, vy, dd.y * hs), p)
 	p.cd = 0.4
+	p.kick_anim = 0.25
 	p.face = dd
 	last_passer = p
 	last_pass_time = clock
@@ -1216,6 +1220,7 @@ func _do_shot(p: Player, ch: float, aim: Vector2) -> void:
 	ball.position = from
 	ball.kick(Vector3(hd.x * s, vy + rng.randfn(0.0, sig * 6.0), hd.y * s), p)
 	p.cd = 0.45
+	p.kick_anim = 0.25
 	p.face = hd
 	last_passer = null
 	pass_t = 0.0
@@ -1824,8 +1829,8 @@ func _update_camera(dt: float) -> void:
 	elif mode == "legend" and controlled != null:
 		var f := controlled.position * 0.72 + ball.position * 0.28
 		look = Vector3(f.x, 0, f.z)
-		offs = Vector3(0, 13.0, 19.0)
-		fov_t = 50.0
+		offs = Vector3(0, 8.5, 13.5)
+		fov_t = 52.0
 	else:
 		var bpos := ball.position
 		look = Vector3(clampf(bpos.x + ball.vel.x * 0.18, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, bpos.z * 0.35)
