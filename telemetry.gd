@@ -36,7 +36,7 @@ var t0 := 0
 class TLogger extends Logger:
 	var owner_t = null
 	func _log_error(function: String, file: String, line: int, code: String, rationale: String, editor_notify: bool, error_type: int, script_backtraces: Array) -> void:
-		if owner_t == null:
+		if owner_t == null or code.contains("Connection to remote host failed"):
 			return
 		var kind := "error"
 		if error_type == 1:
@@ -47,7 +47,7 @@ class TLogger extends Logger:
 			kind = "shader_error"
 		owner_t.push_threadsafe(kind, {"fn": function, "file": file, "line": line, "code": code, "msg": rationale})
 	func _log_message(message: String, error: bool) -> void:
-		if owner_t != null and error:
+		if owner_t != null and error and not message.contains("Connection to remote host failed"):
 			owner_t.push_threadsafe("stderr", {"msg": message.left(300)})
 
 static func ev(kind: String, data := {}) -> void:
@@ -177,7 +177,7 @@ func _flush(_final: bool) -> void:
 	var body := {"sid": sid, "events": batch}
 	if not sent_device:
 		body["device"] = {"os": OS.get_name(), "model": OS.get_model_name()}
-	var url: String = hosts[host_i % hosts.size()] + "/log"
+	var url: String = (last_ok_host if last_ok_host != "" else hosts[host_i % hosts.size()]) + "/log"
 	var err := http.request(url, ["Content-Type: application/json"], HTTPClient.METHOD_POST, JSON.stringify(body))
 	if err != OK:
 		sending = false
@@ -195,6 +195,7 @@ func _on_sent(result: int, code: int, _h: PackedStringArray, _b: PackedByteArray
 	else:
 		fails += 1
 		host_i += 1
+		last_ok_host = ""
 		if fails > 12:
 			fails = 0
 			t_flush = -20.0

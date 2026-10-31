@@ -31,6 +31,9 @@ var ui: TouchUI
 var cam: Camera3D
 var cam_look := Vector3.ZERO
 var cam_fwd := Vector2(0, -1)
+var cam_mode := "behind"
+var cam_zoom := 0.0
+var arrow: Label
 var hud: CanvasLayer
 var lbl_score: Label
 var bug: ScoreBug
@@ -162,8 +165,8 @@ func _build_world() -> void:
 	sun.light_energy = sun_e
 	sun.light_color = sun_col
 	sun.shadow_enabled = true
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-	sun.directional_shadow_max_distance = 95.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_ORTHOGONAL
+	sun.directional_shadow_max_distance = 80.0
 	sun.shadow_bias = 0.04
 	sun.shadow_normal_bias = 1.0
 	add_child(sun)
@@ -331,15 +334,16 @@ func _make_boards() -> void:
 	for side in [-1, 1]:
 		var z: float = side * (Cfg.HALF_W + 3.4)
 		_box(Vector3(118, 1.0, 0.3), Vector3(0, 0.5, z), base)
-		for i in 16:
-			var x := -56.0 + i * 7.5
+		for i in 10:
+			var x := -54.0 + i * 12.0
 			var lab := Label3D.new()
 			lab.text = names[(i + (0 if side < 0 else 3)) % names.size()]
 			lab.font_size = 110
-			lab.pixel_size = 0.0075
+			lab.pixel_size = 0.011
 			lab.modulate = cols[(i + (0 if side < 0 else 2)) % cols.size()]
 			lab.outline_size = 6
 			lab.shaded = false
+			lab.visibility_range_end = 75.0
 			lab.position = Vector3(x, 0.55, z - side * 0.17)
 			if side > 0:
 				lab.rotation.y = PI
@@ -348,15 +352,16 @@ func _make_boards() -> void:
 	for side in [-1, 1]:
 		var x: float = side * (Cfg.HALF_L + 4.5)
 		_box(Vector3(0.3, 1.0, 76), Vector3(x, 0.5, 0), base)
-		for i in 9:
-			var z := -32.0 + i * 8.0
+		for i in 5:
+			var z := -30.0 + i * 15.0
 			var lab := Label3D.new()
 			lab.text = names[(i + 2) % names.size()]
 			lab.font_size = 110
-			lab.pixel_size = 0.0075
+			lab.pixel_size = 0.011
 			lab.modulate = cols[(i + 1) % cols.size()]
 			lab.outline_size = 6
 			lab.shaded = false
+			lab.visibility_range_end = 75.0
 			lab.position = Vector3(x - side * 0.17, 0.55, z)
 			lab.rotation.y = -side * PI * 0.5
 			add_child(lab)
@@ -437,7 +442,7 @@ func _stand(center: Vector3, length: float, rise: float, run: float, yaw: float,
 	roof.position = Vector3(0, rise + 3.2, -run * 0.5 - 1.0)
 	root.add_child(roof)
 	# trusses
-	var n := int(length / 22.0)
+	var n := int(length / 40.0)
 	for i in n + 1:
 		var tx := -length * 0.5 + i * (length / maxf(n, 1))
 		var post := MeshInstance3D.new()
@@ -651,6 +656,16 @@ func _build_hud() -> void:
 	end_panel.offset_bottom = 200
 	end_panel.visible = false
 	hud.add_child(end_panel)
+	arrow = Label.new()
+	arrow.text = "▲"
+	arrow.add_theme_font_size_override("font_size", 36)
+	arrow.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
+	arrow.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.9))
+	arrow.add_theme_constant_override("outline_size", 8)
+	arrow.custom_minimum_size = Vector2(40, 40)
+	arrow.visible = false
+	arrow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(arrow)
 	marker = Label3D.new()
 	marker.text = "▼"
 	marker.font_size = 90
@@ -1692,7 +1707,7 @@ func _human_control(p: Player, dt: float) -> void:
 	var has = ball.carrier == p
 	p.move_cmd = mv
 	p.want_sprint = ui.held["S"]
-	if has:
+	if has or mode == "practice":
 		ui.labels = {"A": "PASS", "B": "SHOOT", "X": "LOB", "Y": "THRU", "S": "SPRINT", "Z": "SKILL"}
 	elif mode == "legend":
 		ui.labels = {"A": "PRESS", "B": "TACKLE", "X": "SLIDE", "Y": "CALL", "S": "SPRINT", "Z": "SKILL"}
@@ -2018,8 +2033,7 @@ func _update_camera(dt: float) -> void:
 	var look := Vector3.ZERO
 	var pos_off := Vector3(0, 13.0, 26.0)
 	var fov_t := 40.0
-	var target_fwd := Vector2(0, -1)
-	var follow := true
+	var k_look := 1.0 - exp(-6.5 * dt)
 	if state == "INTRO":
 		var a := state_t * 0.32 - 0.6
 		cam.position = Vector3(sin(a) * 78.0, 22.0 + state_t * 1.5, cos(a) * 52.0)
@@ -2034,29 +2048,54 @@ func _update_camera(dt: float) -> void:
 		look = ball.position
 		pos_off = Vector3(0, 8.0, 15.0)
 		fov_t = 40.0
-	elif mode == "legend" and controlled != null and human_team >= 0:
+	elif cam_mode == "side" and controlled != null:
+		var f := controlled.position + Vector3(4.0, 0, 0)
+		look = Vector3(clampf(f.x, -40.0, 40.0), 0, f.z * 0.5)
+		pos_off = Vector3(0, 15.0, 24.0)
+		fov_t = 46.0
+		cam_fwd = cam_fwd.lerp(Vector2(0, -1), 1.0 - exp(-3.0 * dt)).normalized()
+	elif (mode == "legend" or mode == "practice") and controlled != null and human_team >= 0:
 		var dirv: int = attack_dir[human_team]
-		target_fwd = Vector2(dirv, -0.3).normalized()
-		cam_fwd = cam_fwd.lerp(target_fwd, clampf(2.5 * dt, 0.0, 1.0)).normalized()
+		var target_fwd := Vector2(dirv, -0.3).normalized()
+		cam_fwd = cam_fwd.lerp(target_fwd, 1.0 - exp(-2.5 * dt)).normalized()
 		var f3 := Vector3(cam_fwd.x, 0, cam_fwd.y)
-		var focus := controlled.position + (ball.position - controlled.position).limit_length(7.0) * 0.5 + f3 * 5.0
+		# ball tracking: lean the camera toward the ball the closer/faster it is, but never lose the player
+		var to_ball := ball.position - controlled.position
+		to_ball.y = 0
+		var pull := clampf(1.1 - to_ball.length() / 38.0, 0.25, 0.75)
+		var lean := (to_ball * pull).limit_length(13.0)
+		lean += Vector3(ball.vel.x, 0, ball.vel.z).limit_length(14.0) * 0.12
+		var focus := controlled.position + lean.limit_length(14.0) + f3 * 4.0
 		focus.y = 0.8
-		cam_look = cam_look.lerp(focus, clampf(7.0 * dt, 0.0, 1.0))
-		cam.position = cam_look - f3 * 14.0 + Vector3(0, 6.6, 0)
+		cam_look = cam_look.lerp(focus, 1.0 - exp(-7.0 * dt))
+		var back := 14.0 + clampf(lean.length() * 0.35, 0.0, 5.0)
+		cam.position = cam_look - f3 * back + Vector3(0, 6.6 + clampf(lean.length() * 0.2, 0.0, 3.0), 0)
 		cam.look_at(cam_look + f3 * 6.0 + Vector3(0, 0.2, 0), Vector3.UP)
-		cam.fov = lerpf(cam.fov, 52.0, clampf(3.0 * dt, 0.0, 1.0))
+		cam.fov = lerpf(cam.fov, 52.0 + clampf(lean.length() * 0.5, 0.0, 6.0), 1.0 - exp(-3.0 * dt))
 		return
 	else:
+		# broadcast: track the ball with velocity lead, zoom out when it is fast or far from the controlled player
 		var bpos := ball.position
 		var dd: int = attack_dir[maxi(human_team, 0)]
-		look = Vector3(clampf(bpos.x + ball.vel.x * 0.18 + dd * 5.0, -Cfg.HALF_L + 8.0, Cfg.HALF_L - 8.0), 0, bpos.z * 0.35)
-		pos_off = Vector3(-dd * 8.0, 27.0, 28.0)
+		var bv := Vector3(ball.vel.x, 0, ball.vel.z)
+		var lead := bv * 0.5
+		lead = lead.limit_length(10.0)
+		var wx := clampf(bpos.x + lead.x + dd * 3.0, -Cfg.HALF_L + 10.0, Cfg.HALF_L - 10.0)
+		var wz := clampf(bpos.z * 0.45 + lead.z * 0.35, -14.0, 14.0)
+		look = Vector3(wx, 0, wz)
+		var spread := 0.0
+		if controlled != null:
+			spread = controlled.pos2().distance_to(Vector2(bpos.x, bpos.z))
+		var zt := clampf(bv.length() / 32.0 + spread / 55.0, 0.0, 1.0)
+		cam_zoom = lerpf(cam_zoom, zt, 1.0 - exp(-1.6 * dt))
+		pos_off = Vector3(-dd * 8.0, 23.0 + 8.0 * cam_zoom, 24.0 + 9.0 * cam_zoom)
 		fov_t = 42.0
-		cam_fwd = cam_fwd.lerp(Vector2(dd * 7.0, -22.0).normalized(), clampf(2.5 * dt, 0.0, 1.0)).normalized()
-	cam_look = cam_look.lerp(look, clampf(4.0 * dt, 0.0, 1.0))
+		cam_fwd = cam_fwd.lerp(Vector2(dd * 8.0, -24.0).normalized(), 1.0 - exp(-2.5 * dt)).normalized()
+		k_look = 1.0 - exp(-5.0 * dt)
+	cam_look = cam_look.lerp(look, k_look)
 	cam.position = cam_look + pos_off
 	cam.look_at(cam_look, Vector3.UP)
-	cam.fov = lerpf(cam.fov, fov_t, clampf(3.0 * dt, 0.0, 1.0))
+	cam.fov = lerpf(cam.fov, fov_t, 1.0 - exp(-3.0 * dt))
 
 func _update_tags() -> void:
 	if controlled == null:
@@ -2080,8 +2119,38 @@ func _update_tags() -> void:
 			p.name_tag.modulate = Color(0.35, 1.0, 0.5) if p == c else tinfo[p.team]["c1"].lightened(0.55)
 			p.name_tag.position = Vector3(0, 2.95 if p == c else 2.5, 0)
 
+func _update_arrow() -> void:
+	if arrow == null or cam == null or ball == null:
+		return
+	var vp := get_viewport().get_visible_rect().size
+	var behind := cam.is_position_behind(ball.position)
+	var sp := cam.unproject_position(ball.position)
+	var off := behind or sp.x < 40.0 or sp.x > vp.x - 40.0 or sp.y < 60.0 or sp.y > vp.y - 40.0
+	arrow.visible = off and (state == "PLAY" or state == "RESTART")
+	if off:
+		var c := vp * 0.5
+		var d := sp - c
+		if behind:
+			d = -d
+		if d.length() < 1.0:
+			d = Vector2(0, 1)
+		var ang := d.angle()
+		var e := d.normalized()
+		var tx := 9999.0
+		if absf(e.x) > 0.001:
+			tx = ((vp.x - 60.0) * 0.5) / absf(e.x)
+		var ty := 9999.0
+		if absf(e.y) > 0.001:
+			ty = ((vp.y - 120.0) * 0.5) / absf(e.y)
+		var t := minf(tx, ty)
+		var pos := c + e * t
+		arrow.position = pos - Vector2(20, 20)
+		arrow.rotation = ang + PI * 0.5
+		arrow.pivot_offset = Vector2(20, 20)
+
 func _update_hud(_dt: float) -> void:
 	_update_tags()
+	_update_arrow()
 	var mins := int(clampf(clock / match_len * 90.0, 0.0, 90.0))
 	lbl_score.text = "%s %d - %d %s   %d'" % [tinfo[0]["short"], score[0], score[1], tinfo[1]["short"], mins]
 	power_bar.visible = charge > 0.01

@@ -48,11 +48,15 @@ func _mat(c: Color, rough := 0.85) -> StandardMaterial3D:
 	m.roughness = rough
 	return m
 
-func _part(mesh: Mesh, pos: Vector3, mat: Material, parent: Node3D) -> MeshInstance3D:
+func _part(mesh: Mesh, pos: Vector3, mat: Material, parent: Node3D, detail := false) -> MeshInstance3D:
 	var mi := MeshInstance3D.new()
 	mi.mesh = mesh
 	mi.position = pos
 	mi.material_override = mat
+	if detail:
+		# small details: no shadow, culled beyond 24 m (big draw-call saving on phones)
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		mi.visibility_range_end = 24.0
 	parent.add_child(mi)
 	return mi
 
@@ -111,6 +115,7 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	num_label.position = Vector3(0, 1.25, -0.27)
 	num_label.rotation.y = PI
 	num_label.shaded = false
+	num_label.visibility_range_end = 40.0
 	visual.add_child(num_label)
 	# shorts
 	_part(_box_mesh(0.52, 0.32, 0.34), Vector3(0, 0.82, 0), shorts_m, visual)
@@ -126,33 +131,33 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 	var hstyle := (idx * 3 + team * 2) % 6
 	var hmat := _mat(hair_cols[(idx + team) % hair_cols.size()])
 	if hstyle != 5:
-		_part(hair, Vector3(0, 1.9, -0.02), hmat, visual)
+		_part(hair, Vector3(0, 1.9, -0.02), hmat, visual, true)
 	if hstyle == 1:
 		var bun := SphereMesh.new()
 		bun.radius = 0.09
 		bun.height = 0.18
-		_part(bun, Vector3(0, 2.08, -0.08), hmat, visual)
+		_part(bun, Vector3(0, 2.08, -0.08), hmat, visual, true)
 	elif hstyle == 2:
 		var curl := SphereMesh.new()
 		curl.radius = 0.24
 		curl.height = 0.3
-		_part(curl, Vector3(0, 1.93, -0.02), hmat, visual)
+		_part(curl, Vector3(0, 1.93, -0.02), hmat, visual, true)
 	if hstyle == 3 or hstyle == 4:
 		var beard := SphereMesh.new()
 		beard.radius = 0.17
 		beard.height = 0.22
-		_part(beard, Vector3(0, 1.74, 0.07), hmat, visual)
+		_part(beard, Vector3(0, 1.74, 0.07), hmat, visual, true)
 	# face: eyes + nose
 	var eye := SphereMesh.new()
 	eye.radius = 0.028
 	eye.height = 0.056
 	var eye_m := _mat(Color(0.05, 0.05, 0.06), 0.3)
-	_part(eye, Vector3(-0.07, 1.84, 0.17), eye_m, visual)
-	_part(eye, Vector3(0.07, 1.84, 0.17), eye_m, visual)
+	_part(eye, Vector3(-0.07, 1.84, 0.17), eye_m, visual, true)
+	_part(eye, Vector3(0.07, 1.84, 0.17), eye_m, visual, true)
 	var nose := SphereMesh.new()
 	nose.radius = 0.035
 	nose.height = 0.07
-	_part(nose, Vector3(0, 1.78, 0.19), skin_m, visual)
+	_part(nose, Vector3(0, 1.78, 0.19), skin_m, visual, true)
 	# legs (pivot at the hip)
 	for side in [-1, 1]:
 		var pivot := Node3D.new()
@@ -160,7 +165,7 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 		visual.add_child(pivot)
 		_part(_box_mesh(0.15, 0.36, 0.17), Vector3(0, -0.2, 0), skin_m, pivot)
 		_part(_box_mesh(0.15, 0.34, 0.17), Vector3(0, -0.55, 0), sock_m, pivot)
-		_part(_box_mesh(0.16, 0.1, 0.26), Vector3(0, -0.74, 0.04), boot_m, pivot)
+		_part(_box_mesh(0.16, 0.1, 0.26), Vector3(0, -0.74, 0.04), boot_m, pivot, true)
 		if side < 0:
 			leg_l = pivot
 		else:
@@ -171,7 +176,7 @@ func build(c1: Color, c2: Color, gk: bool, style := 0) -> void:
 		ap.position = Vector3(side * 0.38, 1.5, 0)
 		visual.add_child(ap)
 		_part(_box_mesh(0.12, 0.3, 0.13), Vector3(0, -0.14, 0), shirt, ap)
-		_part(_box_mesh(0.1, 0.3, 0.11), Vector3(0, -0.4, 0), skin_m if not gk else _mat(Color(0.9, 0.9, 0.2)), ap)
+		_part(_box_mesh(0.1, 0.3, 0.11), Vector3(0, -0.4, 0), skin_m if not gk else _mat(Color(0.9, 0.9, 0.2)), ap, true)
 		if side < 0:
 			arm_l = ap
 		else:

@@ -30,6 +30,15 @@ func _ready() -> void:
 		add_child(m)
 		m.finished.connect(func(r): print("SUMMARY goals=%d,%d shots=%d,%d on=%d,%d passes=%d,%d tackles=%d kicks=%d throw=%d corner=%d gk=%d" % [r["score"][0], r["score"][1], r["shots"][0], r["shots"][1], r["shots_on"][0], r["shots_on"][1], m.passes_done[0], m.passes_done[1], r["log"]["tackles"], r["log"]["kicks"], r["log"]["throwins"], r["log"]["corners"], r["log"]["goalkicks"]]); get_tree().quit())
 		return
+	if "--practicetest" in args:
+		Engine.time_scale = 3.0
+		Engine.max_physics_steps_per_frame = 8
+		_practice_test()
+		return
+	for arg in args:
+		if arg.begins_with("--pshots="):
+			_practice_shots(arg.substr(9))
+			return
 	if "--teltest" in args:
 		var tel := Telemetry.new()
 		add_child(tel)
@@ -55,6 +64,9 @@ func _ready() -> void:
 		_career_test()
 		return
 	_load_settings()
+	TouchUI.scale_f = float(settings.get("btn_scale", 1.0))
+	TouchUI.lefty = bool(settings.get("lefty", false))
+	TouchUI.opacity = float(settings.get("btn_opacity", 1.0))
 	var tel := Telemetry.new()
 	add_child(tel)
 	ui_theme = _make_theme()
@@ -202,13 +214,14 @@ func _launch_match(cfgm: Dictionary, on_done: Callable) -> void:
 # ------------------------------------------------------------ main menu
 
 func _main_menu() -> void:
-	var vb := _screen("GOALLINE", "Offline football. No licences, no internet.")
+	var vb := _screen("GOALLINE", "Offline football. No licences, no internet needed.")
 	vb.add_spacer(false)
-	_btn(vb, "Kick Off", _kickoff_setup, 76)
-	_btn(vb, "Become a Legend  (Career)", _career_entry, 76)
-	_btn(vb, "Settings", _settings, 76)
+	_btn(vb, "Kick Off", _kickoff_setup, 74)
+	_btn(vb, "Become a Legend  (Career)", _career_entry, 74)
+	_btn(vb, "Practice", _practice_menu, 74)
+	_btn(vb, "Settings", _settings, 74)
 	vb.add_spacer(false)
-	_lab(vb, "Controls: left thumb = move.  A pass  X lob  Y through ball  B shoot (hold for power)  SPRINT hold.  Defending: B tackle, X slide, A/Y switch or call.", 18, true)
+	_lab(vb, "Left thumb moves. Right thumb: SHOOT / PASS / THRU / LOB, hold SPRINT, tap SKILL. On defence: B tackle, X slide, A/Y switch or call.", 18, true)
 
 func _kickoff_setup() -> void:
 	var vb := _screen("Kick Off")
@@ -252,7 +265,7 @@ func _kickoff_setup() -> void:
 	go.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 func _settings() -> void:
-	var vb := _screen("Settings", "Rename the clubs (saved on this device).")
+	var vb := _screen("Settings", "Controls, diagnostics and club names (saved on this device).")
 	var teams := Data.teams()
 	var edits := []
 	var sc := ScrollContainer.new()
@@ -262,15 +275,19 @@ func _settings() -> void:
 	inner.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	inner.add_theme_constant_override("separation", 8)
 	sc.add_child(inner)
-	for i in teams.size():
-		var le := LineEdit.new()
-		le.text = teams[i]["name"]
-		le.custom_minimum_size = Vector2(0, 56)
-		inner.add_child(le)
-		edits.append(le)
 	var mins := [2, 3, 4, 5, 8, 10]
 	_lab(inner, "Career match length (min)")
 	var o := _opt(inner, mins, mins.find(settings["minutes"]) if mins.has(settings["minutes"]) else 2)
+	_lab(inner, "Touch controls")
+	var sizes := [0.85, 1.0, 1.2]
+	var size_o := _opt(inner, ["Small buttons", "Normal buttons", "Large buttons"], sizes.find(TouchUI.scale_f) if sizes.has(TouchUI.scale_f) else 1)
+	var left_cb := CheckBox.new()
+	left_cb.text = "Left-handed layout"
+	left_cb.button_pressed = TouchUI.lefty
+	left_cb.custom_minimum_size = Vector2(0, 56)
+	inner.add_child(left_cb)
+	var ops := [1.0, 0.75, 0.5]
+	var op_o := _opt(inner, ["Buttons 100% visible", "Buttons 75% visible", "Buttons 50% visible"], ops.find(TouchUI.opacity) if ops.has(TouchUI.opacity) else 0)
 	var tel_cb := CheckBox.new()
 	tel_cb.text = "Send diagnostics to the developer's laptop (Wi-Fi)"
 	tel_cb.button_pressed = Telemetry.inst == null or Telemetry.inst.enabled
@@ -280,6 +297,13 @@ func _settings() -> void:
 	host_le.placeholder_text = "Log server (optional), e.g. http://192.168.1.129:8799"
 	host_le.custom_minimum_size = Vector2(0, 56)
 	inner.add_child(host_le)
+	_lab(inner, "Club names")
+	for i in teams.size():
+		var le := LineEdit.new()
+		le.text = teams[i]["name"]
+		le.custom_minimum_size = Vector2(0, 56)
+		inner.add_child(le)
+		edits.append(le)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 20)
 	vb.add_child(row)
@@ -290,6 +314,12 @@ func _settings() -> void:
 			names.append(e.text)
 		Data.save_team_names(names)
 		settings["minutes"] = mins[o.selected]
+		settings["btn_scale"] = sizes[size_o.selected]
+		settings["lefty"] = left_cb.button_pressed
+		settings["btn_opacity"] = ops[op_o.selected]
+		TouchUI.scale_f = sizes[size_o.selected]
+		TouchUI.lefty = left_cb.button_pressed
+		TouchUI.opacity = ops[op_o.selected]
 		_save_settings()
 		var tf := FileAccess.open("user://telemetry.json", FileAccess.WRITE)
 		if tf:
@@ -299,6 +329,69 @@ func _settings() -> void:
 			if host_le.text.strip_edges() != "":
 				Telemetry.inst.hosts.push_front(host_le.text.strip_edges())
 		_main_menu()).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+# ------------------------------------------------------------ practice
+
+var practice_note := ""
+
+func _skill_points_text() -> String:
+	if Career.exists():
+		var c := Career.new()
+		if c.load_save():
+			return "Career skill points: %d" % c.d["player"]["pts"]
+	return "Banked skill points: %d (added to your first career)" % PracticeData.banked()
+
+func _practice_menu() -> void:
+	var vb := _screen("Practice", _skill_points_text() + ("   |   " + practice_note if practice_note != "" else ""))
+	practice_note = ""
+	var g := GridContainer.new()
+	g.columns = 2
+	g.add_theme_constant_override("h_separation", 20)
+	g.add_theme_constant_override("v_separation", 8)
+	g.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	vb.add_child(g)
+	for id in PracticeScene.ORDER:
+		var info: Dictionary = PracticeScene.DRILLS[id]
+		var card := VBoxContainer.new()
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var st := PracticeData.stars(id)
+		var best = PracticeData.best_score(id)
+		var tag := "" if id == "free" else ("   " + "★".repeat(st) + "☆".repeat(3 - st) + ("   best %s" % ("%.1fs" % best if id == "slalom" else str(int(best))) if best != null else ""))
+		_btn(card, info["name"] + tag, func(): _launch_practice(id), 58)
+		_lab(card, info["desc"], 15, true)
+		g.add_child(card)
+	_btn(vb, "Back", _main_menu, 60)
+
+func _launch_practice(drill: String) -> void:
+	var teams := Data.teams()
+	var club := 0
+	var lg := {"name": "You", "number": 10, "pace": 62, "shoot": 62, "pass": 60, "defend": 40}
+	if Career.exists():
+		var c := Career.new()
+		if c.load_save():
+			club = c.d["club"]
+			var pl: Dictionary = c.d["player"]
+			lg = {"name": pl["name"], "number": pl["number"], "pace": pl["pace"], "shoot": pl["shoot"], "pass": pl["pass"], "defend": pl["defend"]}
+	var h := _team_cfg(club, teams[club]["rating"])
+	var a := _fix_clash(h, _team_cfg((club + 1) % teams.size(), 65.0))
+	Telemetry.ev("practice_launch", {"drill": drill})
+	if Telemetry.inst != null:
+		Telemetry.inst.in_match = true
+	layer.visible = false
+	var ps := PracticeScene.new()
+	ps.cfg = {"home": h, "away": a, "drill": drill, "legend": lg, "tod": ["day", "dusk"][rng.randi() % 2]}
+	match_node = ps
+	add_child(ps)
+	ps.finished.connect(func(r):
+		Telemetry.ev("practice_end", r)
+		if Telemetry.inst != null:
+			Telemetry.inst.in_match = false
+		ps.queue_free()
+		match_node = null
+		layer.visible = true
+		if r.get("points", 0) > 0:
+			practice_note = "+%d skill points earned" % r["points"]
+		_practice_menu())
 
 # ------------------------------------------------------------ career
 
@@ -364,6 +457,10 @@ func _career_create() -> void:
 			nm = "Rookie"
 		career = Career.new()
 		career.new_career(nm, pos_keys[o1.selected], int(sp.value), arch_keys[o2.selected], starters[o3.selected])
+		var extra := PracticeData.take_banked()
+		if extra > 0:
+			career.d["player"]["pts"] += extra
+			career.save()
 		_career_intro()).size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 func _career_intro() -> void:
@@ -593,6 +690,7 @@ func _bot_loop(m: MatchScene, bot: Bot, r: RandomNumberGenerator) -> void:
 			m._send_finished(false)
 		if m.controlled == null or m.finished_sent:
 			continue
+		m.ui.stick_id = 999
 		var p: Player = m.controlled
 		var ball: Ball = m.ball
 		var to := Vector2(ball.position.x - p.position.x, ball.position.z - p.position.z)
@@ -633,6 +731,8 @@ func _ui_shots() -> void:
 	await _snap("3_settings")
 	_career_entry()
 	await _snap("4_entry")
+	_practice_menu()
+	await _snap("4b_practice")
 	_career_create()
 	await _snap("5_create")
 	career = Career.new()
@@ -650,4 +750,77 @@ func _ui_shots() -> void:
 	career.d.erase("season_done")
 	_career_hub()
 	await _snap("10_seasonend")
+	get_tree().quit()
+
+func _stick_for(m: MatchScene, w: Vector2) -> Vector2:
+	var f := m.cam_fwd
+	var r := Vector2(-f.y, f.x)
+	return Vector2(w.dot(r), -w.dot(f)).limit_length(1.0)
+
+func _practice_test() -> void:
+	var teams := Data.teams()
+	for drill in PracticeScene.ORDER:
+		var h := _team_cfg(0, 70.0)
+		var a := _fix_clash(h, _team_cfg(1, 70.0))
+		var ps := PracticeScene.new()
+		ps.cfg = {"home": h, "away": a, "drill": drill, "tod": "day"}
+		add_child(ps)
+		var done := [false]
+		var res := [{}]
+		ps.finished.connect(func(r): done[0] = true; res[0] = r)
+		var frames := 0
+		while not done[0] and frames < 60 * 300:
+			await get_tree().process_frame
+			frames += 1
+			if not is_instance_valid(ps) or ps.finished_sent:
+				break
+			ps.ui.stick_id = 999
+			var me: Player = ps.controlled
+			var ball: Ball = ps.ball
+			var carry = (ball.carrier == me)
+			var goal := Vector2(Cfg.HALF_L - me.position.x, -me.position.z)
+			var tobal := Vector2(ball.position.x - me.position.x, ball.position.z - me.position.z)
+			if ps.done:
+				ps._send_finished(false)
+				continue
+			match drill:
+				"slalom":
+					ps.ui.move = _stick_for(ps, Vector2(1, sin(me.position.x * 0.5) * 0.35)) if carry else _stick_for(ps, tobal)
+					ps.ui.held["S"] = true
+				"skill":
+					ps.ui.move = _stick_for(ps, Vector2(cos(ps.drill_clock), sin(ps.drill_clock * 0.7))) if carry else _stick_for(ps, tobal)
+					if carry and frames % 20 == 0:
+						ps.ui.just["Z"] = true
+				"passing":
+					if carry and ps.pass_target_p != null:
+						var tw := Vector2(ps.pass_target_p.position.x - me.position.x, ps.pass_target_p.position.z - me.position.z)
+						ps.ui.move = _stick_for(ps, tw)
+						if frames % 30 == 0:
+							ps.ui.just["A"] = true
+					else:
+						ps.ui.move = _stick_for(ps, tobal)
+				_:
+					if carry:
+						ps.ui.move = _stick_for(ps, goal) if goal.length() > 15.0 and drill == "free" else _stick_for(ps, Vector2(1, 0.1))
+						if goal.length() < 26.0 and frames % 25 == 0:
+							ps.ui.just["B"] = true
+							ps.ui.rel["B"] = 0.55
+					else:
+						ps.ui.move = _stick_for(ps, tobal)
+						ps.ui.held["S"] = true
+		print("DRILL ", drill, " done=", done[0], " frames=", frames, " result=", res[0])
+		if is_instance_valid(ps):
+			ps.queue_free()
+		await get_tree().process_frame
+	get_tree().quit()
+
+func _practice_shots(drill: String) -> void:
+	var h := _team_cfg(0, 70.0)
+	var a := _fix_clash(h, _team_cfg(1, 70.0))
+	var ps := PracticeScene.new()
+	ps.cfg = {"home": h, "away": a, "drill": drill, "tod": "day"}
+	add_child(ps)
+	var t0 := Time.get_ticks_msec()
+	await get_tree().create_timer(3.0).timeout
+	get_viewport().get_texture().get_image().save_png("res://shots/practice_%s.png" % drill)
 	get_tree().quit()
